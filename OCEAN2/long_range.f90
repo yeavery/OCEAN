@@ -1674,7 +1674,7 @@ module ocean_long_range
     logical :: have_pbc, have_curvi
 
     real(DP), allocatable :: curvi_coord(:, :)
-    integer :: i, num_coord
+    integer :: num_coord
  
     character(len=24) :: rpotName
     character(len=1) :: dumc
@@ -1742,8 +1742,6 @@ module ocean_long_range
         pbc( : ) = sys%kmesh( : )
       endif
       write(6,*) 'PBC controls:', pbc(:)
-      
-
     endif
 
 #ifdef MPI    
@@ -1768,8 +1766,9 @@ module ocean_long_range
       call MPI_BCAST(num_coord, 1, MPI_INTEGER, 0, comm, ierr)
       if (ierr /= 0) goto 111
       ! if not root, allocate array of size curvi_coord
-      if (myid .ne 0) then
+      if (myid /= 0) then
          allocate( curvi_coord(num_coord, 3) )
+      endif
       call MPI_BCAST(curvi_coord, num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
       if (ierr /= 0) goto 111
     endif
@@ -1778,11 +1777,12 @@ module ocean_long_range
             ! TODO: figure out parameters
             call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr, num_coord, curvi_coord )
             if (ierr /= 0) goto 111
+            deallocate( curvi_coord )
     else
             call regular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr)
             if (ierr /= 0) goto 111
-
-    deallocate( ptab, rtab, curvi_coord )
+    endif
+    deallocate( ptab, rtab )
 
 111 continue
 
@@ -1917,13 +1917,13 @@ module ocean_long_range
     real( DP ), intent( in ) :: amet(3,3), epsi
     integer, intent( in ) :: nptab, pbc(3)
     real( DP ), intent( in ) :: ptab(:), rtab(:)
-    logical, intent( in ) :: isolated, num_coord
+    logical, intent( in ) :: isolated
     integer, intent( inout ) :: ierr
     real( DP ) :: fr( 3 ), xk( 3 ), alf( 3 ), r, potn, pbc_prefac(3), dir(3)
     integer :: i, k1, k2, k3, kk1, kk2, kk3, xiter, kiter, xtarg, ytarg, ztarg
 
     real(DP), intent( in ) :: curvi_coord(:, :)
-    integer :: i, num_coord
+    integer :: num_coord
 
     ! TODO: delete print statements 
     print *, "entered irregular grid subroutine"
@@ -1937,65 +1937,68 @@ module ocean_long_range
 
       ! kmesh loop
       do k1 = 1, sys%kmesh( 1 )
-        kk1 = k1 - 1
-        if ( kk1 .ge. ( sys%kmesh( 1 ) + 1 )/ 2 ) kk1 = kk1 - sys%kmesh( 1 )
-            if ( sys%kmesh( 1 ) .eq. 1 ) kk1 = 0
-            xk( 1 ) = kk1
-            if( kk1 .gt. pbc( 1 ) ) then
-              pbc_prefac(1) = 0.0_DP
-            else
-              pbc_prefac(1) = 1.0_DP
-            endif
-            do k2 = 1, sys%kmesh( 2 )
-              kk2 = k2 - 1
-              if ( kk2 .ge. ( sys%kmesh( 2 ) + 1 ) / 2 ) kk2 = kk2 - sys%kmesh( 2 )
-              if( sys%kmesh( 2 ) .eq. 1 ) kk2 = 0
-              xk( 2 ) = kk2
-              if( kk2 .gt. pbc( 2 ) ) then
-                pbc_prefac(2) = 0.0_DP
-              else
-                pbc_prefac(2) = pbc_prefac(1)
-              endif
+         kk1 = k1 - 1
+         if ( kk1 .ge. ( sys%kmesh( 1 ) + 1 )/ 2 ) kk1 = kk1 - sys%kmesh( 1 )
+         if ( sys%kmesh( 1 ) .eq. 1 ) kk1 = 0
+         xk( 1 ) = kk1
+         if( kk1 .gt. pbc( 1 ) ) then
+           pbc_prefac(1) = 0.0_DP
+         else
+           pbc_prefac(1) = 1.0_DP
+         endif
 
-              do k3 = 1, sys%kmesh( 3 )
-                kk3 = k3 - 1
-                if ( kk3 .ge. ( sys%kmesh( 3 ) + 1 ) / 2 ) kk3 = kk3 - sys%kmesh( 3 )
-                if( sys%kmesh( 3 ) .eq. 1 ) kk3 = 0
-                xk( 3 ) = kk3
-                if( kk3 .gt. pbc( 3 ) ) then
-                  pbc_prefac(3) = 0.0_DP
-                else
-                  pbc_prefac(3) = pbc_prefac(2)
-                endif
+         do k2 = 1, sys%kmesh( 2 )
+           kk2 = k2 - 1
+           if ( kk2 .ge. ( sys%kmesh( 2 ) + 1 ) / 2 ) kk2 = kk2 - sys%kmesh( 2 )
+           if( sys%kmesh( 2 ) .eq. 1 ) kk2 = 0
+           xk( 2 ) = kk2
+           if( kk2 .gt. pbc( 2 ) ) then
+             pbc_prefac(2) = 0.0_DP
+           else
+             pbc_prefac(2) = pbc_prefac(1)
+           endif
+           do k3 = 1, sys%kmesh( 3 )
+             kk3 = k3 - 1
+             if ( kk3 .ge. ( sys%kmesh( 3 ) + 1 ) / 2 ) kk3 = kk3 - sys%kmesh( 3 )
+             if( sys%kmesh( 3 ) .eq. 1 ) kk3 = 0
+             
+             xk( 3 ) = kk3
+             if( kk3 .gt. pbc( 3 ) ) then
+               pbc_prefac(3) = 0.0_DP
+             else
+               pbc_prefac(3) = pbc_prefac(2)
+             endif
 
-                  kiter = kiter + 1
-                  alf( : ) = xk( : ) + fr( : ) - my_tau( : )
-                  r = sqrt( dot_product( alf, matmul( amet, alf ) ) )
-                  if ( isolated .and. r .gt. iso_cut ) then
-                    potn = 0.0_DP
-                  elseif ( r .gt. rtab( nptab ) ) then
-
-                    if( sys%have3dEpsilon ) then
-                      dir( : ) = matmul( sys%avec(:,:), alf(:) ) / r
-                      potn = ( dir(1)**2/sys%epsilon3D(1) + dir(2)**2/sys%epsilon3D(2) &
-                             + dir(3)**2/sys%epsilon3D(3) ) / r
+             kiter = kiter + 1
+             alf( : ) = xk( : ) + fr( : ) - my_tau( : )
+             r = sqrt( dot_product( alf, matmul( amet, alf ) ) )
+             if( isolated .and. r .gt. iso_cut ) then
+                potn = 0.0_DP
+             elseif ( r .gt. rtab( nptab ) ) then
+                if( sys%have3dEpsilon ) then
+                  dir( : ) = matmul( sys%avec(:,:), alf(:) ) / r
+                  potn = ( dir(1)**2/sys%epsilon3D(1) + dir(2)**2/sys%epsilon3D(2) &
+                         + dir(3)**2/sys%epsilon3D(3) ) / r
                       if( r .lt. rtab( nptab ) + 5.0_DP ) then
                         potn = potn * ( r - rtab( nptab ) ) / 5.0_DP &
                              + ( rtab( nptab ) + 5.0_DP - r ) * epsi / ( 5.0_DP * r )
                       endif
-                    else
-                      potn = epsi / r
-                    endif
-                  else
-                    call intval( nptab, rtab, ptab, r, potn, 'cap', 'cap' )
-                  end if
-                  W( kiter, xiter - my_start_nx + 1 ) =  potn * pbc_prefac(3) * sys%interactionScale
-                end do
-              end do
-            end do
-          endif
-         end do
-111 continue
+                else
+                  potn = epsi / r
+                endif
+             else
+                call intval( nptab, rtab, ptab, r, potn, 'cap', 'cap' )
+             endif
+                W( kiter, xiter - my_start_nx + 1 ) =  potn * pbc_prefac(3) * sys%interactionScale
+
+           ! for k3 loop
+           enddo
+         ! for k2 loop  
+         enddo
+       ! for k1 loop
+       enddo
+    ! for outermost loop  
+    enddo
  end subroutine irregular_grid
 
 #if 0
