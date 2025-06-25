@@ -1686,8 +1686,6 @@ module ocean_long_range
         amet( i , j ) = dot_product( sys%avec( :, i ), sys%avec( :, j ) )
       enddo
     enddo
-
-    ! TODO: test regular grid function
     
     if( myid .eq. 0 ) then
 
@@ -1716,9 +1714,6 @@ module ocean_long_range
       ! open file and read it into an array
       inquire(file='reduced_uniform.txt', exist=have_curvi)        
       if ( have_curvi ) then
-        ! TODO: delete print statements
-        print *, "custom grid exists"
-
         open(unit=99, file='reduced_uniform.txt', form='formatted', status='old', action='read')
         ! read number of coordinates from first line
         read(99, *) num_coord
@@ -1805,7 +1800,6 @@ module ocean_long_range
     real( DP ) :: fr( 3 ), xk( 3 ), alf( 3 ), r, potn, pbc_prefac(3), dir(3)
     integer :: ix, iy, iz, k1, k2, k3, kk1, kk2, kk3, xiter, kiter, xtarg, ytarg, ztarg
 
-    ! TODO: delete print statements
     print *, "entered regular grid subroutine"
 
     if( myid .eq. root ) write(6,*) 'Tau: ', my_tau(:), my_xshift(:)
@@ -1835,7 +1829,11 @@ module ocean_long_range
           endif
           fr( 1 ) = dble( xtarg - 1 ) / dble( sys%xmesh( 1 ) )
           xiter = xiter + 1
-          if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
+          
+          ! TODO: diff files
+          if( myid .eq. root) write(102,'(I0,F10.4,F10.4,F10.4)') xiter, fr(:)
+
+      if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
           kiter = 0
 
           do k1 = 1, sys%kmesh( 1 )
@@ -1925,78 +1923,78 @@ module ocean_long_range
     real(DP), intent( in ) :: curvi_coord(:, :)
     integer :: num_coord
 
-    ! TODO: delete print statements 
-    !print *, "entered irregular grid subroutine"
-
+    print *, "entered irregular grid subroutine"
+    if(num_coord .ne. product(sys%xmesh(:))) then
+            print *, "xmesh does not match irregular grid dims"
+            ierr = 3
+            return
+    endif
     if( myid .eq. root ) write(6,*) 'Tau: ', my_tau(:), my_xshift(:)
-    xiter = 1
+    xiter = 0
     do i = 1, num_coord
-    ! TODO: check if out of bounds array access
-      fr( 1 ) = curvi_coord(i, 1)
-      fr( 2 ) = curvi_coord(i, 2)
-      fr( 3 ) = curvi_coord(i, 3)
-
-      kiter = 0
-      ! kmesh loop
-      do k1 = 1, sys%kmesh( 1 )
-         kk1 = k1 - 1
-         if ( kk1 .ge. ( sys%kmesh( 1 ) + 1 )/ 2 ) kk1 = kk1 - sys%kmesh( 1 )
-         if ( sys%kmesh( 1 ) .eq. 1 ) kk1 = 0
-         xk( 1 ) = kk1
-         if( kk1 .gt. pbc( 1 ) ) then
-           pbc_prefac(1) = 0.0_DP
-         else
-           pbc_prefac(1) = 1.0_DP
-         endif
-
-         do k2 = 1, sys%kmesh( 2 )
-           kk2 = k2 - 1
-           if ( kk2 .ge. ( sys%kmesh( 2 ) + 1 ) / 2 ) kk2 = kk2 - sys%kmesh( 2 )
-           if( sys%kmesh( 2 ) .eq. 1 ) kk2 = 0
-           xk( 2 ) = kk2
-           if( kk2 .gt. pbc( 2 ) ) then
-             pbc_prefac(2) = 0.0_DP
-           else
-             pbc_prefac(2) = pbc_prefac(1)
-           endif
-           do k3 = 1, sys%kmesh( 3 )
-             kk3 = k3 - 1
-             if ( kk3 .ge. ( sys%kmesh( 3 ) + 1 ) / 2 ) kk3 = kk3 - sys%kmesh( 3 )
-             if( sys%kmesh( 3 ) .eq. 1 ) kk3 = 0
-             
-             xk( 3 ) = kk3
-             if( kk3 .gt. pbc( 3 ) ) then
-               pbc_prefac(3) = 0.0_DP
-             else
-               pbc_prefac(3) = pbc_prefac(2)
-             endif
-
-             kiter = kiter + 1
-             alf( : ) = xk( : ) + fr( : ) - my_tau( : )
-             r = sqrt( dot_product( alf, matmul( amet, alf ) ) )
-             if( isolated .and. r .gt. iso_cut ) then
-                potn = 0.0_DP
-             elseif ( r .gt. rtab( nptab ) ) then
-                if( sys%have3dEpsilon ) then
-                  dir( : ) = matmul( sys%avec(:,:), alf(:) ) / r
-                  potn = ( dir(1)**2/sys%epsilon3D(1) + dir(2)**2/sys%epsilon3D(2) &
-                         + dir(3)**2/sys%epsilon3D(3) ) / r
-                      if( r .lt. rtab( nptab ) + 5.0_DP ) then
-                        potn = potn * ( r - rtab( nptab ) ) / 5.0_DP &
-                             + ( rtab( nptab ) + 5.0_DP - r ) * epsi / ( 5.0_DP * r )
-                      endif
-                else
-                  potn = epsi / r
-                endif
-             else
-                call intval( nptab, rtab, ptab, r, potn, 'cap', 'cap' )
-             endif
-             ! TODO: segfault here (invalid memory reference, need to deallocate curvi_coord? maybe)
-                W( kiter, xiter - my_start_nx + 1 ) =  potn * pbc_prefac(3) * sys%interactionScale
-           enddo  
-         enddo
-       enddo  
-       xiter = xiter + 1
+    fr( 1 ) = curvi_coord(i, 1)
+    fr( 2 ) = curvi_coord(i, 2)
+    fr( 3 ) = curvi_coord(i, 3)
+    xiter = xiter + 1
+    if( myid .eq. root) write(101,'(I0,F10.4,F10.4,F10.4)') xiter, fr(:)
+    if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
+            kiter = 0
+            ! kmesh loop
+            do k1 = 1, sys%kmesh( 1 )
+            kk1 = k1 - 1
+            if ( kk1 .ge. ( sys%kmesh( 1 ) + 1 )/ 2 ) kk1 = kk1 - sys%kmesh( 1 )
+            if ( sys%kmesh( 1 ) .eq. 1 ) kk1 = 0
+            xk( 1 ) = kk1
+            if( kk1 .gt. pbc( 1 ) ) then
+                    pbc_prefac(1) = 0.0_DP
+            else
+                    pbc_prefac(1) = 1.0_DP
+            endif
+            do k2 = 1, sys%kmesh( 2 )
+            kk2 = k2 - 1
+            if ( kk2 .ge. ( sys%kmesh( 2 ) + 1 ) / 2 ) kk2 = kk2 - sys%kmesh( 2 )
+            if( sys%kmesh( 2 ) .eq. 1 ) kk2 = 0
+            xk( 2 ) = kk2
+            if( kk2 .gt. pbc( 2 ) ) then
+                    pbc_prefac(2) = 0.0_DP
+            else
+                    pbc_prefac(2) = pbc_prefac(1)
+            endif
+            do k3 = 1, sys%kmesh( 3 )
+            kk3 = k3 - 1
+            if ( kk3 .ge. ( sys%kmesh( 3 ) + 1 ) / 2 ) kk3 = kk3 - sys%kmesh( 3 )
+            if( sys%kmesh( 3 ) .eq. 1 ) kk3 = 0
+            xk( 3 ) = kk3
+            if( kk3 .gt. pbc( 3 ) ) then
+                    pbc_prefac(3) = 0.0_DP
+            else
+                    pbc_prefac(3) = pbc_prefac(2)
+            endif
+            kiter = kiter + 1
+            alf( : ) = xk( : ) + fr( : ) - my_tau( : )
+            r = sqrt( dot_product( alf, matmul( amet, alf ) ) )
+            if( isolated .and. r .gt. iso_cut ) then
+                    potn = 0.0_DP
+            elseif ( r .gt. rtab( nptab ) ) then
+                    if( sys%have3dEpsilon ) then
+                            dir( : ) = matmul( sys%avec(:,:), alf(:) ) / r
+                            potn = ( dir(1)**2/sys%epsilon3D(1) + dir(2)**2/sys%epsilon3D(2) &
+                                    + dir(3)**2/sys%epsilon3D(3) ) / r
+                            if( r .lt. rtab( nptab ) + 5.0_DP ) then
+                                    potn = potn * ( r - rtab( nptab ) ) / 5.0_DP &
+                                            + ( rtab( nptab ) + 5.0_DP - r ) * epsi / ( 5.0_DP * r )
+                            endif
+                    else
+                            potn = epsi / r
+                    endif
+            else
+                    call intval( nptab, rtab, ptab, r, potn, 'cap', 'cap' )
+            endif
+            W( kiter, xiter - my_start_nx + 1 ) =  potn * pbc_prefac(3) * sys%interactionScale
+            enddo  
+            enddo
+            enddo  
+    endif
     enddo
  end subroutine irregular_grid
 
