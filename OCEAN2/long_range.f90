@@ -1926,15 +1926,17 @@ module ocean_long_range
     integer :: num_coord
 
     ! TODO: delete print statements 
-    print *, "entered irregular grid subroutine"
+    !print *, "entered irregular grid subroutine"
 
     if( myid .eq. root ) write(6,*) 'Tau: ', my_tau(:), my_xshift(:)
-    xiter = 0
+    xiter = 1
     do i = 1, num_coord
+    ! TODO: check if out of bounds array access
       fr( 1 ) = curvi_coord(i, 1)
       fr( 2 ) = curvi_coord(i, 2)
       fr( 3 ) = curvi_coord(i, 3)
 
+      kiter = 0
       ! kmesh loop
       do k1 = 1, sys%kmesh( 1 )
          kk1 = k1 - 1
@@ -1989,15 +1991,12 @@ module ocean_long_range
              else
                 call intval( nptab, rtab, ptab, r, potn, 'cap', 'cap' )
              endif
+             ! TODO: segfault here (invalid memory reference, need to deallocate curvi_coord? maybe)
                 W( kiter, xiter - my_start_nx + 1 ) =  potn * pbc_prefac(3) * sys%interactionScale
-
-           ! for k3 loop
-           enddo
-         ! for k2 loop  
+           enddo  
          enddo
-       ! for k1 loop
-       enddo
-    ! for outermost loop  
+       enddo  
+       xiter = xiter + 1
     enddo
  end subroutine irregular_grid
 
