@@ -57,7 +57,7 @@ module OCEAN_bloch
     implicit none
     type( o_system ), intent( in ) :: sys
     integer, intent( inout ) :: ierr
-!    real(DP), intent(out) :: rbs_out(my_num_bands,my_kpts,my_xpts,sys%nspn) 
+!   real(DP), intent(out) :: rbs_out(my_num_bands,my_kpts,my_xpts,sys%nspn) 
 !    real(DP), intent(out) :: ibs_out(my_num_bands,my_kpts,my_xpts,sys%nspn) 
     real(DP), intent(out) :: rbs_out(:,:,:,:)
     real(DP), intent(out) :: ibs_out(:,:,:,:)
@@ -72,12 +72,9 @@ module OCEAN_bloch
     integer :: ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
     integer :: xiter, ibd, ispn
 
+    ! TODO: separate phase shift into 2 helper functions. Keep xshift the same for now.
 
     ! Change phase as if things were flipped around. Don't actually re-distribute
-    rbs_out = 0.0_dp
-    ibs_out = 0.0_dp
-    rbs_sp_out = 0.0_SP
-    ibs_sp_out = 0.0_SP
     pi = 4.0d0 * atan( 1.0d0 )
     !
     ! Reasoning for the below;
@@ -117,107 +114,116 @@ module OCEAN_bloch
     tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
-
-!    nx_left = sys%nxpts
-!    nx_start = 1
-!    do i = 0, nproc - 1
-!      nx_tmp = nx_left / ( nproc - i )
-!      nx_left = nx_left - nx_tmp
-!      if( myid .eq. i ) my_start = nx_start
-!      nx_start = nx_start + nx_tmp
-!    enddo
-
-    do ispn = 1, sys%nspn
-
-      xiter = 0
-      do iz = 1, sys%xmesh(3)
-        ztarg = iz - xshift( 3 )
-        if( ztarg .gt. sys%xmesh(3) ) then
-          ztarg = ztarg - sys%xmesh(3)
-          zph = -sys%xmesh(3)
-        elseif( ztarg .lt. 1 ) then
-          ztarg = ztarg + sys%xmesh(3)
-          zph = sys%xmesh(3)
-        else
-          zph = 0
-        endif
-        do iy = 1, sys%xmesh(2)
-          ytarg = iy - xshift( 2 )
-          if( ytarg .gt. sys%xmesh(2) ) then
-            ytarg = ytarg - sys%xmesh(2)
-            yph = -sys%xmesh(2)
-          elseif( ytarg .lt. 1 ) then
-            ytarg = ytarg + sys%xmesh(2)
-            yph = sys%xmesh(2)
-          else
-            yph = 0
-          endif 
-          do ix = 1, sys%xmesh(1)
-            xiter = xiter + 1
-            if( xiter .lt. my_start_nx ) cycle
-  !JTV ???
-            if( xiter .gt. my_start_nx + my_xpts - 1 ) goto 111
-            xtarg = ix - xshift( 1 )
-            if( xtarg .gt. sys%xmesh(1) ) then
-              xtarg = xtarg - sys%xmesh(1)
-              xph = -sys%xmesh(1)
-            elseif( xtarg .lt. 1 ) then
-              xtarg = xtarg + sys%xmesh(1) 
-              xph = sys%xmesh(1)
-            else
-            xph = 0
-            endif 
-            
-            iq = 0
-            do iq1 = 1, sys%kmesh( 1 )
-              do iq2 = 1, sys%kmesh( 2 )
-                do iq3 = 1, sys%kmesh( 3 )
-                  iq = iq + 1
-
-                  phsx = 2.0d0 * pi * dble( ( xph + ix - 1 ) * ( iq1 - 1 ) ) / dble( sys%xmesh(1) * sys%kmesh( 1 ) )
-                  phsy = 2.0d0 * pi * dble( ( yph + iy - 1 ) * ( iq2 - 1 ) ) / dble( sys%xmesh(2) * sys%kmesh( 2 ) )
-                  phsz = 2.0d0 * pi * dble( ( zph + iz - 1 ) * ( iq3 - 1 ) ) / dble( sys%xmesh(3) * sys%kmesh( 3 ) )
-                  cphs = dcos( phsx + phsy + phsz ) 
-                  sphs = dsin( phsx + phsy + phsz )
-                  !JTV replace this stupid thing with a rotation thingy
-                  ! rbs_out = re_bloch_state
-                  ! ibs_out = im_bloch_state
-                  ! call DROT( nbd, rbs_out, 1, ibs_out, 1, cphs, -sphs )
-                  if( use_sp ) then
-                    do ibd = 1, my_num_bands
-                      rbs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            = cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            - sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
-                      ibs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            = cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            + sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
-                    enddo
-                  else
-                    do ibd = 1, my_num_bands
-                      rbs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  & 
-                            = cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            - sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn ) 
-                      ibs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            = cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
-                            + sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
-                    enddo
-                  endif
-                enddo
-              enddo
-            enddo
-
-          enddo
-        enddo
-      enddo
+    ! TODO: check if custom grid exists like before
+    ! then call either regular or irregular grid
+   call regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+   if ( ierr /= 0 ) goto 111
 
 111 continue
-  enddo ! spin
-
-          
-
-
   end subroutine OCEAN_bloch_lrLOAD
 
+  subroutine regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+    
+    real(DP) :: cphs, sphs, pi, phsx, phsy, phsz
+    integer :: iq, iq1, iq2, iq3
+    integer :: ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
+
+    ! inputs from lrLOAD
+    type( o_system ), intent( in ) :: sys
+    integer, intent( inout ) :: ierr
+
+    real(DP), intent( in ) :: tau(3)
+    integer, intent( in ) :: xshift( 3 )
+    logical, intent( in ) :: use_sp
+    real(DP), intent(inout) :: rbs_out
+    real(DP), intent(inout) :: ibs_out
+    real(SP), intent(inout) :: rbs_sp_out
+    real(SP), intent(inout) :: ibs_sp_out
+
+    ! phase shift
+    do ispn = 1, sys%nspn
+    xiter = 0
+    do iz = 1, sys%xmesh(3)
+    ztarg = iz - xshift( 3 )
+    if( ztarg .gt. sys%xmesh(3) ) then
+            ztarg = ztarg - sys%xmesh(3)
+            zph = -sys%xmesh(3)
+    elseif( ztarg .lt. 1 ) then
+            ztarg = ztarg + sys%xmesh(3)
+            zph = sys%xmesh(3)
+    else
+            zph = 0
+    endif
+
+    do iy = 1, sys%xmesh(2)
+    ytarg = iy - xshift( 2 )
+    if( ytarg .gt. sys%xmesh(2) ) then
+            ytarg = ytarg - sys%xmesh(2)
+            yph = -sys%xmesh(2)
+    elseif( ytarg .lt. 1 ) then
+            ytarg = ytarg + sys%xmesh(2)
+            yph = sys%xmesh(2)
+    else
+            yph = 0
+    endif
+    
+    do ix = 1, sys%xmesh(1)
+    xiter = xiter + 1
+    if( xiter .lt. my_start_nx ) cycle
+    if( xiter .gt. my_start_nx + my_xpts - 1 ) goto 111
+    xtarg = ix - xshift( 1 )
+    if( xtarg .gt. sys%xmesh(1) ) then
+            xtarg = xtarg - sys%xmesh(1)
+            xph = -sys%xmesh(1)
+    elseif( xtarg .lt. 1 ) then
+            xtarg = xtarg + sys%xmesh(1)
+            xph = sys%xmesh(1)
+    else
+            xph = 0
+    endif
+    iq = 0
+    do iq1 = 1, sys%kmesh( 1 )
+    do iq2 = 1, sys%kmesh( 2 )
+    do iq3 = 1, sys%kmesh( 3 )
+    iq = iq + 1
+    phsx = 2.0d0 * pi * dble( ( xph + ix - 1 ) * ( iq1 - 1 ) ) / dble( sys%xmesh(1) * sys%kmesh( 1 ) )
+    phsy = 2.0d0 * pi * dble( ( yph + iy - 1 ) * ( iq2 - 1 ) ) / dble( sys%xmesh(2) * sys%kmesh( 2 ) )
+    phsz = 2.0d0 * pi * dble( ( zph + iz - 1 ) * ( iq3 - 1 ) ) / dble( sys%xmesh(3) * sys%kmesh( 3 ) )
+    cphs = dcos( phsx + phsy + phsz )
+    sphs = dsin( phsx + phsy + phsz )
+    if( use_sp ) then
+            do ibd = 1, my_num_bands
+            rbs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    = cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    - sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+            ibs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    = cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    + sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+            enddo
+    else
+            do ibd = 1, my_num_bands
+            rbs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    = cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    - sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+            ibs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    = cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  &
+                    + sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+            enddo
+    endif
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
+    enddo
+      111 continue
+    enddo
+  end subroutine regular_lrLOAD
+
+  subroutine irregular_lrLOAD( curvi_coord, num_coord )
+    ! separate x, y, z and calculate phase shifts
+
+  end subroutine irregular_lrLOAD
 
   subroutine OCEAN_bloch_lrINIT( xpts, kpts, num_bands, start_nx, ierr )
     implicit none
