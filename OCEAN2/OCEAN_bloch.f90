@@ -69,8 +69,12 @@ module OCEAN_bloch
 
     real(DP) :: cphs, sphs, pi, phsx, phsy, phsz
     integer :: iq, iq1, iq2, iq3
-    integer :: ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
+    integer :: i, ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
     integer :: xiter, ibd, ispn
+
+    real(DP), allocatable :: curvi_coord(:, :)
+    integer :: num_coord
+    logical :: have_curvi
 
     ! TODO: separate phase shift into 2 helper functions. Keep xshift the same for now.
 
@@ -114,10 +118,42 @@ module OCEAN_bloch
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
     ! TODO: check if custom grid exists like before
-    ! then call either regular or irregular grid
-   call regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
-   if ( ierr /= 0 ) goto 111
+    if (myid .eq. root ) then
+            inquire(file='reduced_uniform.txt', exist=have_curvi)
+            if ( have_curvi ) then
+                    open(unit=99, file='reduced_uniform.txt', form='formatted', status='old', action='read')
+                    ! read number of coordinates from first line
+                    read(99, *) num_coord
+                    allocate( curvi_coord(num_coord, 3) )
+                    do i = 1, num_coord
+                    read(99, *) curvi_coord(i, 1), curvi_coord(i, 2), curvi_coord(i, 3)
+                    enddo
+                    close(99)
+            endif
+    endif
 
+#ifdef MPI
+    call MPI_BCAST(have_curvi, 1, MPI_LOGICAL, 0, comm, ierr)
+    if (ierr /= 0) goto 111
+    if (have_curvi) then
+            call MPI_BCAST(num_coord, 1, MPI_INTEGER, 0, comm, ierr)
+            if (ierr /= 0) goto 111
+            ! if not root, allocate array of size curvi_coord
+            if (myid /= 0) then
+                    allocate( curvi_coord(num_coord, 3) )
+            endif
+            call MPI_BCAST(curvi_coord, num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
+            if (ierr /= 0) goto 111
+    endif
+#endif
+    if (have_curvi) then
+            call irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )
+            if (ierr /= 0) goto 111
+            deallocate(curvi_coord)
+    else
+            call regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+            if ( ierr /= 0 ) goto 111
+    endif
 111 continue
   end subroutine OCEAN_bloch_lrLOAD
 
@@ -217,9 +253,100 @@ module OCEAN_bloch
   enddo
 end subroutine regular_lrLOAD
 
-  subroutine irregular_lrLOAD( curvi_coord, num_coord )
-    ! separate x, y, z and calculate phase shifts
+  subroutine irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )
+      use OCEAN_mpi
+      use OCEAN_system
+      implicit none
+      type( o_system ), intent( in ) :: sys
+      integer, intent( inout ) :: ierr
+      real(DP), intent( in ) :: tau(3)
+      integer, intent( in ) :: xshift( 3 )
+      logical, intent( in ) :: use_sp
+      real(DP), intent(inout) :: rbs_out(:,:,:,:)
+      real(DP), intent(inout) :: ibs_out(:,:,:,:)
+      real(SP), intent(inout) :: rbs_sp_out(:,:,:,:)
+      real(SP), intent(inout) :: ibs_sp_out(:,:,:,:)
 
+      real(DP), intent( in ) :: curvi_coord(:, :)
+      integer :: num_coord
+
+      real(DP) :: cphs, sphs, pi, phsx, phsy, phsz
+      integer :: iq, iq1, iq2, iq3
+
+      ! TODO: clean up any vars you don't need
+      
+      integer :: i, ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
+      integer :: xiter, ibd, ispn
+      integer :: xmax, ymax, zmax, xmin, ymin, zmin, xrange, yrange, zrange
+
+      xmin = curvi_coord(1, 1)
+      xmax = curvi_coord(num_coord, 1)
+      ymin = curvi_coord(1, 2)
+      ymax = curvi_coord(num_coord, 2)
+      zmin = curvi_coord(1, 3)
+      zmax = curvi_coord(num_coord, 3)
+      xrange = xmax - xmin
+      yrange = ymax - ymin
+      zrange = zmax - zmin
+
+      ! TODO: fast index thing (I think it's all x's first, then y, etc)
+      ! in order to test this, xshift can't be = 0
+      ! sanity check: xshift override still = 0
+
+      pi = 4.0d0 * atan( 1.0d0 )
+
+      ! for every coordinate in the grid, calculate phsx, phsy, etc.
+      ! since we compare with xmesh to check if at edge of grid,
+      ! find the endpoints on custom grid
+
+      do ispn = 1, sys%nspn
+        xiter = 0
+        do i = 1, num_coord
+          ! z-coord
+          iz = curvi_coord(i, 3)
+          ztarg = iz - xshift(3)
+
+          if (ztarg .gt. zmax) then
+                  ztarg = ztarg - zrange
+                  zph = -zrange
+          elseif (ztarg .lt. zmin) then
+                  ztarg = ztarg + zrange
+                  zph = zrange
+          else
+                  zph = 0
+          endif
+
+          ! y-coord
+          iy = curvi_coord(i, 2)
+          ytarg = iy - xshift(2)
+          if (ytarg .gt. ymax) then
+                  ytarg = ytarg - yrange
+                  yph = -yrange
+          elseif (ytarg .lt. ymin) then
+                  ytarg = ytarg + yrange
+                  yph = yrange
+          else
+                  yph = 0
+          endif
+
+          ! x-coord
+          ix = curvi_coord(i, 1)
+          xtarg = ix - xshift(1)
+          if (xtarg .gt. xmax) then
+                  xtarg = xtarg - xrange
+                  xph = -xrange
+          elseif (xtarg .lt. xmin) then
+                  xtarg = xtarg + xrange
+                  xph = xrange
+          else
+                  xph = 0
+          endif
+        ! for coordinate loop
+        enddo
+      ! for spin loop  
+      enddo 
+
+      ! TODO: kmesh steps
   end subroutine irregular_lrLOAD
 
   subroutine OCEAN_bloch_lrINIT( xpts, kpts, num_bands, start_nx, ierr )
