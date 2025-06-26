@@ -1769,7 +1769,6 @@ module ocean_long_range
     endif
 #endif
     if (have_curvi) then
-            ! TODO: figure out parameters
             call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr, num_coord, curvi_coord )
             if (ierr /= 0) goto 111
             deallocate( curvi_coord )
@@ -1800,8 +1799,6 @@ module ocean_long_range
     real( DP ) :: fr( 3 ), xk( 3 ), alf( 3 ), r, potn, pbc_prefac(3), dir(3)
     integer :: ix, iy, iz, k1, k2, k3, kk1, kk2, kk3, xiter, kiter, xtarg, ytarg, ztarg
 
-    print *, "entered regular grid subroutine"
-
     if( myid .eq. root ) write(6,*) 'Tau: ', my_tau(:), my_xshift(:)
     xiter = 0
     do iz = 1, sys%xmesh( 3 )
@@ -1829,9 +1826,6 @@ module ocean_long_range
           endif
           fr( 1 ) = dble( xtarg - 1 ) / dble( sys%xmesh( 1 ) )
           xiter = xiter + 1
-          
-          ! TODO: diff files
-          if( myid .eq. root) write(102,'(I0,F10.4,F10.4,F10.4)') xiter, fr(:)
 
       if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
           kiter = 0
@@ -1923,7 +1917,6 @@ module ocean_long_range
     real(DP), intent( in ) :: curvi_coord(:, :)
     integer :: num_coord
 
-    print *, "entered irregular grid subroutine"
     if(num_coord .ne. product(sys%xmesh(:))) then
             print *, "xmesh does not match irregular grid dims"
             ierr = 3
@@ -1936,7 +1929,6 @@ module ocean_long_range
     fr( 2 ) = curvi_coord(i, 2)
     fr( 3 ) = curvi_coord(i, 3)
     xiter = xiter + 1
-    if( myid .eq. root) write(101,'(I0,F10.4,F10.4,F10.4)') xiter, fr(:)
     if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
             kiter = 0
             ! kmesh loop

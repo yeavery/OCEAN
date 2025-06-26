@@ -68,12 +68,10 @@ module OCEAN_bloch
     logical, intent( in ) :: use_sp
 
     real(DP) :: cphs, sphs, pi, phsx, phsy, phsz
-    integer :: iq, iq1, iq2, iq3
-    integer :: i, ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
     integer :: xiter, ibd, ispn
 
     real(DP), allocatable :: curvi_coord(:, :)
-    integer :: num_coord
+    integer :: i, num_coord
     logical :: have_curvi
 
     ! TODO: separate phase shift into 2 helper functions. Keep xshift the same for now.
@@ -117,7 +115,7 @@ module OCEAN_bloch
     tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
-    ! TODO: check if custom grid exists like before
+    ! check if custom grid exists like before
     if (myid .eq. root ) then
             inquire(file='reduced_uniform.txt', exist=have_curvi)
             if ( have_curvi ) then
@@ -275,9 +273,9 @@ end subroutine regular_lrLOAD
 
       ! TODO: clean up any vars you don't need
       
-      integer :: i, ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
+      integer :: i, xtarg, ytarg, ztarg, xph, yph, zph
       integer :: xiter, ibd, ispn
-      integer :: xmax, ymax, zmax, xmin, ymin, zmin, xrange, yrange, zrange
+      real(SP) :: ix, iy, iz, xmax, ymax, zmax, xmin, ymin, zmin, xrange, yrange, zrange
 
       xmin = curvi_coord(1, 1)
       xmax = curvi_coord(num_coord, 1)
@@ -289,10 +287,6 @@ end subroutine regular_lrLOAD
       yrange = ymax - ymin
       zrange = zmax - zmin
 
-      ! TODO: fast index thing (I think it's all x's first, then y, etc)
-      ! in order to test this, xshift can't be = 0
-      ! sanity check: xshift override still = 0
-
       pi = 4.0d0 * atan( 1.0d0 )
 
       ! for every coordinate in the grid, calculate phsx, phsy, etc.
@@ -303,15 +297,22 @@ end subroutine regular_lrLOAD
         xiter = 0
         do i = 1, num_coord
           ! z-coord
-          iz = curvi_coord(i, 3)
+          ! scale coordinates so they're between 1 and xmesh
+          ! (xmesh - 1) * x + 1
+          ix = (sys%xmesh(1) - 1) * curvi_coord(i, 1) + 1
+          iy = (sys%xmesh(2) - 1) * curvi_coord(i, 2) + 1
+          iz = (sys%xmesh(3) - 1) * curvi_coord(i, 3) + 1
+          
+          print *, "iz = ", iz
+
           ztarg = iz - xshift(3)
 
-          if (ztarg .gt. zmax) then
-                  ztarg = ztarg - zrange
-                  zph = -zrange
-          elseif (ztarg .lt. zmin) then
-                  ztarg = ztarg + zrange
-                  zph = zrange
+          if (ztarg .gt. sys%xmesh(3)) then
+                  ztarg = ztarg - sys%xmesh(3)
+                  zph = -sys%xmesh(3)
+          elseif (ztarg .lt. 1) then
+                  ztarg = ztarg + sys%xmesh(3)
+                  zph = sys%xmesh(3)
           else
                   zph = 0
           endif
@@ -319,34 +320,68 @@ end subroutine regular_lrLOAD
           ! y-coord
           iy = curvi_coord(i, 2)
           ytarg = iy - xshift(2)
-          if (ytarg .gt. ymax) then
-                  ytarg = ytarg - yrange
-                  yph = -yrange
-          elseif (ytarg .lt. ymin) then
-                  ytarg = ytarg + yrange
-                  yph = yrange
+          if (ytarg .gt. sys%xmesh(2)) then
+                  ytarg = ytarg - sys%xmesh(2)
+                  yph = -sys%xmesh(2)
+          elseif (ytarg .lt. 1) then
+                  ytarg = ytarg + sys%xmesh(2)
+                  yph = sys%xmesh(2)
           else
                   yph = 0
           endif
 
           ! x-coord
+          if (myid .eq. root) print *, "ix = ", ix
+
           ix = curvi_coord(i, 1)
           xtarg = ix - xshift(1)
-          if (xtarg .gt. xmax) then
-                  xtarg = xtarg - xrange
-                  xph = -xrange
-          elseif (xtarg .lt. xmin) then
-                  xtarg = xtarg + xrange
-                  xph = xrange
+          if (xtarg .gt. sys%xmesh(1)) then
+                  xtarg = xtarg - sys%xmesh(1)
+                  xph = -sys%xmesh(1)
+          elseif (xtarg .lt. 1) then
+                  xtarg = xtarg + sys%xmesh(1)
+                  xph = sys%xmesh(1)
           else
                   xph = 0
-          endif
+          endif  
+
+          iq = 0
+          do iq1 = 1, sys%kmesh(1)
+            do iq2 = 1, sys%kmesh(2)
+              do iq3 = 1, sys%kmesh(3)
+                iq = iq + 1
+                ! TODO: how will these equations change?
+                phsx = 2.0d0 * pi * dble( ( xph + ix - 1 ) * ( iq1 - 1 ) ) / dble( sys%xmesh(1) * sys%kmesh( 1 ) )
+                phsy = 2.0d0 * pi * dble( ( yph + iy - 1 ) * ( iq2 - 1 ) ) / dble( sys%xmesh(2) * sys%kmesh( 2 ) )
+                phsz = 2.0d0 * pi * dble( ( zph + iz - 1 ) * ( iq3 - 1 ) ) / dble( sys%xmesh(3) * sys%kmesh( 3 ) )
+                cphs = dcos( phsx + phsy + phsz )
+                sphs = dsin( phsx + phsy + phsz )
+                if (use_sp) then
+                        do ibd = 1, my_num_bands
+                        rbs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
+                                cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  - &
+                                sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+                        ibs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
+                                cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  + &
+                                sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn ) 
+                        enddo
+                else
+                       do ibd = 1, my_num_bands
+                       rbs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
+                               cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  - &
+                               sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+                       ibs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
+                               cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  + &
+                               sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+                       enddo
+                endif
+              enddo
+            enddo
+          enddo   
         ! for coordinate loop
         enddo
       ! for spin loop  
       enddo 
-
-      ! TODO: kmesh steps
   end subroutine irregular_lrLOAD
 
   subroutine OCEAN_bloch_lrINIT( xpts, kpts, num_bands, start_nx, ierr )
