@@ -67,9 +67,6 @@ module OCEAN_bloch
     integer, intent( out ) :: xshift( 3 )
     logical, intent( in ) :: use_sp
 
-    real(DP) :: cphs, sphs, pi, phsx, phsy, phsz
-    integer :: xiter, ibd, ispn
-
     real(DP), allocatable :: curvi_coord(:, :)
     integer :: i, num_coord
     logical :: have_curvi
@@ -289,6 +286,8 @@ end subroutine regular_lrLOAD
                     curvi_coord(i, j) = curvi_coord(i, j) - 1
             endif
           enddo
+          xiter = xiter + 1
+
           iq = 0
           do iq1 = 1, sys%kmesh(1)
             do iq2 = 1, sys%kmesh(2)
@@ -311,6 +310,9 @@ end subroutine regular_lrLOAD
                         enddo
                 else
                         do ibd = 1, my_num_bands
+                          print *, 'xiter ', xiter
+                          print *, 'index ', xiter - my_start_nx + 1
+
                           rbs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
                                   cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  - &
                                   sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
