@@ -274,8 +274,9 @@ end subroutine regular_lrLOAD
        
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
-        xiter = 0
-        do i = 1, num_coord
+        !xiter = my_start_nx
+        !do i = 1, num_coord
+        do i = my_start_nx, my_start_nx + my_xpts - 1
           do j = 1, 3
             ! shift the coordinate
             curvi_coord(i, j) = curvi_coord(i, j) - xshift(j)
@@ -286,14 +287,13 @@ end subroutine regular_lrLOAD
                     curvi_coord(i, j) = curvi_coord(i, j) - 1
             endif
           enddo
-          xiter = xiter + 1
+          !xiter = xiter + 1
 
           iq = 0
           do iq1 = 1, sys%kmesh(1)
             do iq2 = 1, sys%kmesh(2)
               do iq3 = 1, sys%kmesh(3)
                 iq = iq + 1
-                ! TODO: is q-vector = (iq1, iq2, iq3)
                 qvec = [iq1, iq2, iq3]
                 ! calculate phase shift: 2pi * (kvec dot coordinate)
                 phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(i, :)) 
@@ -301,24 +301,21 @@ end subroutine regular_lrLOAD
                 sphs = dsin(phs_tot)
                 if (use_sp) then
                         do ibd = 1, my_num_bands
-                          rbs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
-                                  cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  - &
-                                  sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
-                          ibs_sp_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
-                                  cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  + &
-                                  sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+                          rbs_sp_out( ibd, iq, i - my_start_nx + 1, ispn )  = &
+                                  cphs * re_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )  - &
+                                  sphs * im_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )
+                          ibs_sp_out( ibd, iq, i - my_start_nx + 1, ispn )  = &
+                                  cphs * im_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )  + &
+                                  sphs * re_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )
                         enddo
                 else
                         do ibd = 1, my_num_bands
-                          print *, 'xiter ', xiter
-                          print *, 'index ', xiter - my_start_nx + 1
-
-                          rbs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
-                                  cphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  - &
-                                  sphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
-                          ibs_out( ibd, iq, xiter - my_start_nx + 1, ispn )  = &
-                                  cphs * im_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )  + &
-                                  sphs * re_bloch_state( ibd, iq, xiter - my_start_nx + 1, ispn )
+                          rbs_out( ibd, iq, i - my_start_nx + 1, ispn )  = &
+                                  cphs * re_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )  - &
+                                  sphs * im_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )
+                          ibs_out( ibd, iq, i - my_start_nx + 1, ispn )  = &
+                                  cphs * im_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )  + &
+                                  sphs * re_bloch_state( ibd, iq, i - my_start_nx + 1, ispn )
                         enddo
                 endif
               enddo
