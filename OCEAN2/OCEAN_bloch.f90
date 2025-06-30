@@ -274,8 +274,6 @@ end subroutine regular_lrLOAD
        
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
-        !xiter = my_start_nx
-        !do i = 1, num_coord
         do i = my_start_nx, my_start_nx + my_xpts - 1
           do j = 1, 3
             ! shift the coordinate
@@ -287,14 +285,13 @@ end subroutine regular_lrLOAD
                     curvi_coord(i, j) = curvi_coord(i, j) - 1
             endif
           enddo
-          !xiter = xiter + 1
 
           iq = 0
           do iq1 = 1, sys%kmesh(1)
             do iq2 = 1, sys%kmesh(2)
               do iq3 = 1, sys%kmesh(3)
                 iq = iq + 1
-                qvec = [iq1, iq2, iq3]
+                qvec = [dble((iq1 - 1)/sys%kmesh(1)), dble((iq2-1)/sys%kmesh(2)), dble((iq3-1)/sys%kmesh(3))]
                 ! calculate phase shift: 2pi * (kvec dot coordinate)
                 phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(i, :)) 
                 cphs = dcos(phs_tot)
