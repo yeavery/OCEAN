@@ -39,7 +39,6 @@ module OCEAN_bloch
   LOGICAL :: is_init = .false.
   LOGICAL :: is_val_init = .false.
   LOGICAL :: is_loaded = .false.
-  LOGICAL :: is_val_loaded = .false.
 
 
   public :: OCEAN_bloch_init, OCEAN_bloch_load, OCEAN_bloch_lrINIT, OCEAN_bloch_lrLOAD, OCEAN_bloch_is_loaded
@@ -153,6 +152,7 @@ module OCEAN_bloch
   end subroutine OCEAN_bloch_lrLOAD
 
   subroutine regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+
   use OCEAN_mpi
   use OCEAN_system
   implicit none
@@ -170,6 +170,8 @@ module OCEAN_bloch
   integer :: ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
   integer :: xiter, ibd, ispn
   pi = 4.0d0 * atan( 1.0d0 )
+
+  print *, "regular subroutine"
 
   do ispn = 1, sys%nspn
     xiter = 0
@@ -214,9 +216,9 @@ module OCEAN_bloch
             do iq2 = 1, sys%kmesh( 2 )
               do iq3 = 1, sys%kmesh( 3 )
                 iq = iq + 1
-                phsx = 2.0d0 * pi * dble( ( xph + ix - 1 ) * ( iq1 - 1 ) ) / dble( sys%xmesh(1) * sys%kmesh( 1 ) )
-                phsy = 2.0d0 * pi * dble( ( yph + iy - 1 ) * ( iq2 - 1 ) ) / dble( sys%xmesh(2) * sys%kmesh( 2 ) )
-                phsz = 2.0d0 * pi * dble( ( zph + iz - 1 ) * ( iq3 - 1 ) ) / dble( sys%xmesh(3) * sys%kmesh( 3 ) )
+                phsx = 2.0d0 * pi * real( ( xph + ix - 1 ) * ( iq1 - 1 ), DP ) / real( sys%xmesh(1) * sys%kmesh( 1 ), DP )
+                phsy = 2.0d0 * pi * real( ( yph + iy - 1 ) * ( iq2 - 1 ), DP ) / real( sys%xmesh(2) * sys%kmesh( 2 ), DP )
+                phsz = 2.0d0 * pi * real( ( zph + iz - 1 ) * ( iq3 - 1 ), DP ) / real( sys%xmesh(3) * sys%kmesh( 3 ), DP )
                 cphs = dcos( phsx + phsy + phsz )
                 sphs = dsin( phsx + phsy + phsz )
                 if( use_sp ) then
@@ -270,6 +272,8 @@ end subroutine regular_lrLOAD
       integer :: i, j
       integer :: xiter, ibd, ispn
 
+      print *, "irregular subroutine"
+
       ! new tau = tau, xshift = what you're shifting every coordinate by
        
       pi = 4.0d0 * atan( 1.0d0 )
@@ -299,7 +303,11 @@ end subroutine regular_lrLOAD
             do iq2 = 1, sys%kmesh(2)
               do iq3 = 1, sys%kmesh(3)
                 iq = iq + 1
-                qvec = [dble((iq1 - 1)/sys%kmesh(1)), dble((iq2-1)/sys%kmesh(2)), dble((iq3-1)/sys%kmesh(3))]
+
+                qvec(1) = real(iq1 - 1, DP) / real(sys%kmesh(1), DP)
+                qvec(2) = real(iq2 - 1, DP) / real(sys%kmesh(2), DP)
+                qvec(3) = real(iq3 - 1, DP) / real(sys%kmesh(3), DP)
+
                 ! calculate phase shift: 2pi * (kvec dot coordinate)
                 phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(i, :)) 
                 cphs = dcos(phs_tot)
@@ -381,7 +389,7 @@ end subroutine regular_lrLOAD
 
 
     integer( S_INT ) :: nx_left, nx_start, nx_tmp, i
-    type(C_PTR) :: cptr
+    
 
     logical :: havefile
 
@@ -455,7 +463,7 @@ end subroutine regular_lrLOAD
     
 
     integer( S_INT ) :: nx_left, nx_start, nx_tmp, i
-    type(C_PTR) :: cptr 
+    
     
 
     if( is_val_init ) return
@@ -517,29 +525,28 @@ end subroutine regular_lrLOAD
 
     integer, parameter :: u2dat = 35
     !
-    integer :: nx, ny, nz, nbd, nq
+    integer :: nx, ny, nz, nbd
 !    real( kind = DP  ), dimension( nx, ny, nz, nbd ) :: ur, ui
     !
     integer :: iq, ibd, ig, idum( 3 ), ix, iy, iz, ivl, ivh, icl, ich, ispn, i
-    integer :: iq1, iq2, iq3, dumint, icl2, ich2, ivh2, xshift(3)
-    integer :: xtarg, ytarg, ztarg, xph, yph, zph
-    real( kind = DP  ) :: phsx, phsy, phsz, cphs, sphs, psir, psii, pi
+    integer :: iq1, iq2, iq3, dumint, ivh2
+  
+    
     real( kind = DP  ) :: su, sul, suh
     real( kind = DP  ), allocatable, dimension( :, :, :, : ) :: tmp_ur, tmp_ui, ur, ui
     real( DP ), allocatable :: re_transpose( :, : ), im_transpose( :, : )
-    complex( DP ), allocatable :: u2_buf( :, :, :, : )
+    
 !    complex( kind = DP  ), allocatable, dimension( :, : ) :: tmp_bloch
-    logical :: metal, normal, ex
-    integer :: nx_left, nx_start, nx_tmp, xiter, ii, width(3)
+    logical :: metal, ex
+    integer :: nx_left, nx_start, nx_tmp, xiter
     character(len=3) :: bloch_type
     logical :: invert_xmesh
 
     !
-    integer :: fmode, fhu2
-    integer(kind=MPI_OFFSET_KIND) :: offset, offset_extra, offset_nx, offset_start
-    integer(8) :: time1, time2, tics_per
+    
+    
 
-    integer :: ncount, u2_status(MPI_STATUS_SIZE), u2_type
+    
 
     if( is_loaded ) return
 
@@ -826,7 +833,7 @@ end subroutine regular_lrLOAD
 
     integer :: width(3), iq_ten
     integer :: fmode, fhu2, u2_type, u2_status(MPI_STATUS_SIZE), ncount, io_comm, nelement
-    integer(kind=MPI_OFFSET_KIND) :: offset, offset_extra, offset_nx, offset_start
+    integer(kind=MPI_OFFSET_KIND) :: offset, offset_extra, offset_start
     integer(8) :: time1, time2, tics_per
     
     logical :: io_group = .false.
@@ -1120,17 +1127,14 @@ end subroutine regular_lrLOAD
 
     complex(DP), allocatable, dimension(:,:) ::  transposeU2, tempU2
     complex(DP), allocatable, dimension(:) :: readU2
-    complex(DP) :: dumz
-    integer :: fflags, fh, myX, nx_start, nx_left, i, ispin, ikpt, sizeofcomplex, ib, curX, bandsInFile
+    integer :: myX, nx_start, nx_left, i, ispin, ikpt, ib, curX, bandsInFile
     logical :: loadConductionBands
 
     character(len=10) :: filnam
-    integer(MPI_OFFSET_KIND) :: offset
 #ifdef MPI_F08
     type( MPI_DATATYPE ) :: fileType
     type( MPI_REQUEST ), allocatable :: requests(:)
 #else
-    integer :: fileType
     integer, allocatable :: requests(:)
 #endif
 
@@ -1242,7 +1246,6 @@ end subroutine regular_lrLOAD
 
     complex(DP), allocatable, dimension(:,:) ::  transposeU2
     complex(DP), allocatable, dimension(:,:,:,:) :: tempU2
-    complex(DP) :: dumz
     integer :: fflags, fh, myX, nx_start, nx_left, i, ispin, ikpt, sizeofcomplex
     logical :: loadConductionBands
 
