@@ -64,12 +64,10 @@ module prep_wvfn
     integer :: num_coord, j
     logical :: have_curvi
 !$  integer, external :: omp_get_max_threads
-
     wantCKS = calcParams%makeCKS
     wantU2 = calcParams%makeU2
     wantLegacy = .false.
     wantTmels = calcParams%makeTmels
-
 
     call odf_return_my_bands( valBands, ierr, ODF_VALENCE )
     if( ierr .ne. 0 ) return
@@ -262,6 +260,7 @@ module prep_wvfn
 
 #ifdef MPI
                   call MPI_BCAST(have_curvi, 1, MPI_LOGICAL, 0, comm, ierr)
+
                   if (ierr /= 0) goto 111
                   if (have_curvi) then
                           call MPI_BCAST(num_coord, 1, MPI_INTEGER, 0, comm, ierr)
@@ -276,7 +275,6 @@ module prep_wvfn
 #endif
                 
                 if (have_curvi) then
-                        ! TODO: figure out params
                         call irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
                                 allBands, nX, fileHandle, odf_flag, num_coord, curvi_coord, ierr)
                         if (ierr /= 0) goto 111
@@ -293,7 +291,7 @@ module prep_wvfn
                         call prep_wvfn_writeU2( ikpt, ispin, UofX2, fileHandle, ierr )
                 endif
                 if (ierr .ne. 0) return
-                deallocate( UofX, UofX2 )
+                !deallocate( UofX, UofX2 )
         endif
 
         ! if doing CKS then compute matrix elements here
@@ -417,7 +415,6 @@ module prep_wvfn
 
   subroutine irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, &
                   odf_flag, num_coord, curvi_coord, ierr )
-    ! TODO: take in unk coeff, FT without augmenting grid, interpolation
     use prep_system, only : system_parameters, params, prep_system_ikpt2kvec, calculation_parameters, prep_system_umklapp
     integer, intent(in) :: ikpt, ispin, nG, nbands, allBands, nX, fileHandle, odf_flag
     integer, pointer :: gvecPointer(:,:)
@@ -444,9 +441,8 @@ module prep_wvfn
               ! don't need to change this function
               call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
               ib2 = ib + nband_todo - 1
-              ! TODO: modify u1
-              ! parameters?
-              call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr )
+              ! TODO: test u1
+              call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr, UofX2 )
               if ( ierr .ne. 0 ) return
             enddo
 
@@ -458,8 +454,6 @@ module prep_wvfn
     else
             allocate( UofX( 0, 0, 0, 0 ), UofX2( 0, 0 ) )
     endif
-    ! TODO: interpolation (outer loop nbands, inner num_pts, interpolate)
-
   end subroutine irregular_prep_wvfn_driver
   
   subroutine regular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, odf_flag, ierr )
@@ -727,133 +721,137 @@ module prep_wvfn
 #endif
   end subroutine prep_wvfn_closeU2
 
-  subroutine irregular_prep_wvfn_u1( wvfn, UofX, num_coord, curvi_coord, ierr )
+  subroutine irregular_prep_wvfn_u1( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2 )
     ! TODO: params? interpolation req. npts, nbands, iband, uofx
     ! don't need avecs, qcart, Pgrid, isInitGrid
-    complex(DP), intent(in) :: wvfn(:,:,:,:)
+    complex(DP), intent(inout) :: wvfn(:,:,:,:)
     complex(DP), intent(in) :: UofX(:,:,:,:)
     real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(in) :: num_coord
     integer, intent(inout) :: ierr
-    
+    complex(DP), intent(out) :: UofX2(:,:)
+
     ! base off of swl_ComplexDoLagrange (line 2468 of SCREEN/src/screen_wvfn_converter.f90)
-    call irregular_interpolation(wvfn, UofX, num_coord, curvi_coord, ierr) ! parameters
+    call irregular_interpolation(wvfn, UofX, num_coord, curvi_coord, ierr, UofX2) ! parameters
 
   end subroutine irregular_prep_wvfn_u1
 
-  subroutine irregular_interpolation( wvfn, UofX, num_coord, curvi_coord, ierr )
-      ! call in irregular_prep_wvfn_u1
-      use ocean_constants, only : pi_dp
-      use ocean_mpi, only : myid
-      use ocean_interpolate
-      ! only pass in array of values, return interpolant that you then evaluate
+  subroutine irregular_interpolation( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2 )
+    ! call in irregular_prep_wvfn_u1
+    use ocean_constants, only : pi_dp
+    use ocean_mpi, only : myid
+    use ocean_interpolate
+    ! only pass in array of values, return interpolant that you then evaluate
 
-      integer, intent( in ) :: num_coord
-      complex(DP), intent( in ) :: UofX(:,:,:,:)
-      real(DP), intent( in ) :: curvi_coord( 3, num_coord )
-      complex(DP), intent( in ) :: wvfn(:,:,:,:)
-      integer, intent( inout ) :: ierr
-      !
-      complex(DP), allocatable :: P(:,:), QGrid(:,:), Q(:), RGrid(:)
-      real(DP), allocatable :: distanceMap(:,:)
-      integer, allocatable :: pointMap(:,:)
-      !
-      complex(DP) :: R
-      real(DP) :: dx, dy, dz, rvec(3)
-      integer :: dims(3), ib, ip, i, j, iy, iz, iyy, izz, offset, iband
+    integer, intent( in ) :: num_coord
+    complex(DP), intent( in ) :: UofX(:,:,:,:)
+    real(DP), intent( in ) :: curvi_coord( 3, num_coord )
+    complex(DP), intent( in ) :: wvfn(:,:,:,:)
+    integer, intent( inout ) :: ierr
+    complex(DP), intent(out) :: UofX2(num_coord, size(wvfn, 4))
+    !
+    complex(DP), allocatable :: P(:,:), QGrid(:,:), Q(:), RGrid(:)
+    real(DP), allocatable :: distanceMap(:,:)
+    integer, allocatable :: pointMap(:,:)
+    !
+    complex(DP) :: R
+    real(DP) :: dx, dy, dz, rvec(3)
+    integer :: dims(3), ib, ip, i, j, ix, iy, iz, iyy, izz, offset, iband
 
-      ! keep order at 4
-      integer :: order, nbands
-      order = 4
-      nbands = size(wvfn, 4)
+    integer :: order, nbands
+    order = 4
+    nbands = size(wvfn, 4)
 
-      allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
-      if( ierr .ne. 0 ) return
+    allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
+    if( ierr .ne. 0 ) return
       
-      dims(1) = size( UofX, 1 )
-      dims(2) = size( UofX, 2 )
-      dims(3) = size( UofX, 3 )
+    dims(1) = size( UofX, 1 )
+    dims(2) = size( UofX, 2 )
+    dims(3) = size( UofX, 3 )
 
-      do ip = 1, num_coord
-        do j = 1, 3
-          rvec( j ) = curvi_coord(j, ip)
-        enddo
-
-        do i = 1, 3
-          do while (rvec(i) .gt. 1.0_DP)
-            rvec(i) = rvec(i) - 1.0_DP
-          enddo
-          do while (rvec(i) .lt. 0.0_DP)
-            rvec(i) = rvec(i) + 1.0_DP
-          enddo
-        enddo
-
-      ! for 4th order want index=2 to be just below
-        pointMap(:, ip) = 1 + floor(rvec(:) * real(dims(:), DP))
-        do j = 1, 3
-          if (pointMap(j, ip) .lt. 1) pointMap(j, ip) = pointMap(j, ip) + dims(j)
-          if (pointMap(j, ip) .gt. dims(j)) pointMap(j, ip) = pointMap(j, ip) - dims(j)
-        enddo
-
-        distanceMap(:, ip) = ( rvec( : ) * real( dims(:), DP ) - floor( rvec( : ) * real( dims(:), DP ) ) ) / real(dims( : ), DP ) 
+    do ip = 1, num_coord
+      do j = 1, 3
+        rvec(j) = curvi_coord(j, ip)
       enddo
 
-      if (mod(order, 2) .eq. 1) then
-              offset = order / 2
-      else
-              offset = order / 2 - 1
-      endif
+      do i = 1, 3
+        do while (rvec(i) .gt. 1.0_DP)
+          rvec(i) = rvec(i) - 1.0_DP
+        enddo
+        do while (rvec(i) .lt. 0.0_DP)
+          rvec(i) = rvec(i) + 1.0_DP
+        enddo
+      enddo
 
-      allocate( P(order,order), QGrid(order,order), Q(order), RGrid(order) )
-      dx = 1.0_dp / dims( 1 )
-      dy = 1.0_dp / dims( 2 )
-      dz = 1.0_dp / dims( 3 )
+      ! for 4th order want index=2 to be just below
+      pointMap(:, ip) = 1 + floor(rvec(:) * real(dims(:), DP))
+      do j = 1, 3
+        if (pointMap(j, ip) .lt. 1) pointMap(j, ip) = pointMap(j, ip) + dims(j)
+        if (pointMap(j, ip) .gt. dims(j)) pointMap(j, ip) = pointMap(j, ip) - dims(j)
+      enddo
 
-      do ib = 1, nbands
-        do ip = 1, num_coord
-          do iz = 0, order - 1
-            izz = pointMap( 3, ip ) + iz - offset
-            if( izz .gt. dims( 3 ) ) izz = izz - dims( 3 )
-            if( izz .lt. 1 ) izz = izz + dims( 3 )
-            
-            do iy = 0, order - 1
-              iyy = pointMap( 2, ip ) + iy - offset
-              if( iyy .gt. dims( 2 ) ) iyy = iyy - dims( 2 )
-              if( iyy .lt. 1 ) iyy = iyy + dims( 2 )
-          enddo ! iy
-        enddo ! iz
+      distanceMap(:, ip) = ( rvec( : ) * real( dims(:), DP ) - floor( rvec( : ) * real( dims(:), DP ) ) ) / real(dims( : ), DP ) 
+    enddo
 
+    if (mod(order, 2) .eq. 1) then
+            offset = order / 2
+    else
+            offset = order / 2 - 1
+    endif
+
+    allocate( P(order,order), QGrid(order,order), Q(order), RGrid(order) )
+    dx = 1.0_dp / dims( 1 )
+    dy = 1.0_dp / dims( 2 )
+    dz = 1.0_dp / dims( 3 )
+
+    ! UofX(nX, nbands)
+    ! when doing interpolation, input regular mesh will be 4-dim (x, y, z, bands)
+    ! output = coordinate index, nbands
+    ! wvfn
+ 
+    do ib = 1, nbands
+      do ip = 1, num_coord
+      ! fill P array with UofX vals for fixed y and z
         do iz = 1, order
-          izz = pointMap( 3, ip ) + iz - 1 - offset
-          if( izz .gt. dims( 3 ) ) izz = izz - dims( 3 )
-          if( izz .lt. 1 ) izz = izz + dims( 3 )
+          izz = pointMap(3, ip) + iz - offset
+          if (izz .gt. dims(3)) izz = izz - dims(3)
+          if (izz .lt. 1) izz = izz + dims(3)
 
           do iy = 1, order
-            iyy = pointMap( 2, ip ) + iy - 1 - offset
-            if( iyy .gt. dims( 2 ) ) iyy = iyy - dims( 2 )
-            if( iyy .lt. 1 ) iyy = iyy + dims( 2 )
+            iyy = pointMap(2, ip) + iy - offset
+            if (iyy .gt. dims(2)) iyy = iyy - dims(2)
+            if (iyy .lt. 1) iyy = iyy + dims(2)
+            
+            ! interpolate in x dim
+            do i = 1, order
+              ix = pointMap(1, ip) + i - 1 - offset !???
+              if (ix .gt. dims(1)) ix = ix - dims(1)
+              if (ix .lt. 1) ix = ix + dims(1)
+              P(i, 1) = UofX(ix, iyy, izz, ib)
+            enddo
+
+            call makeLagrange(order, P(:, i), Q) ! lagrange polynomial for x
+            QGrid(iy, iz) = evalLagrange(order, distanceMap(1,ip), dx, Q)
           enddo
         enddo
 
+        ! interpolate in y for every z
         do iz = 1, order
-          call makeLagrange( order, P(:,iz), QGrid(:,iz) )
-          Q(iz) = evalLagrange( order, distanceMap( 2, ip ), dy, Qgrid(:,iz) )
+          call makeLagrange(order, QGrid(:, iz), Q)
+          RGrid(iz) = evalLagrange(order, distanceMap(2,ip), dy, Q)
         enddo
-
-        call makeLagrange( order, Q, RGrid )
-        R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
-
-        ! complex array instead of 1 real, 1 imag
-        ! TODO: missing an index
-        wvfn(ip, ib + iband - 1, 1) = R
-        ! PointMap:
-        ! look up lagrange interpolation
-
+        ! interpolate in z
+        call makeLagrange(order, RGrid, Q)
+        R = evalLagrange(order, distanceMap(3,ip), dz, Q)  
+        
+        ! coordinate, band
+        ! TODO: seg fault
+        UofX2(ip, ib) = R
       enddo ! ip
     enddo ! ib
-
+    
     deallocate( P, Q, QGrid, RGrid )
-    deallocate( pointMap )
+    deallocate( pointMap, distanceMap )
 
   end subroutine irregular_interpolation
 
