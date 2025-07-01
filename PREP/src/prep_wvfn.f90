@@ -98,10 +98,17 @@ module prep_wvfn
     call prep_wvfn_openU2( 'con', conFH, allBands, nx, poolID, nprocPool, ierr, ctype )
     if( ierr .ne. 0 ) return
 
+    ! TODO: check for reduced uniform.txt here instead
+
+    ! TODO: update UofX2 allocation so that it's consistently nX
     ! need to set the number of x-points proc should epxect locally
     ! probably subroutines/functions in this module
     ! grabbing pool_size and pool_id from ODF
-    nX = prep_wvfn_divideXmesh( product( params%xmesh ), nprocPool, poolID )
+    if (have_curvi) then
+            ! TODO: set nX = prep_svfn_divideXmesh(num_coord, ...)
+    else
+            nX = prep_wvfn_divideXmesh( product( params%xmesh ), nprocPool, poolID )
+    endif
 
     nuni = ceiling( real( params%nspin * params%nkpts, DP ) / real( npool, DP ) )
 
@@ -447,8 +454,10 @@ module prep_wvfn
             enddo
 
             deallocate( wvfn )
-            allocate( UofX2( nX, allBands ) )
-            ! TODO: modify u2 (gram-schmidt)
+            ! TODO: use different array in u1 (maybe UofX?) if same, don't allocate again
+            !allocate( UofX2( nX, allBands ) )
+
+            ! TODO: modify u2 (gram-schmidt) -- crashed here
             call prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
             if ( ierr .ne. 0 ) return
     else
@@ -729,7 +738,7 @@ module prep_wvfn
     real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(in) :: num_coord
     integer, intent(inout) :: ierr
-    complex(DP), intent(out) :: UofX2(:,:)
+    complex(DP), allocatable, intent(out) :: UofX2(:,:)
 
     ! base off of swl_ComplexDoLagrange (line 2468 of SCREEN/src/screen_wvfn_converter.f90)
     call irregular_interpolation(wvfn, UofX, num_coord, curvi_coord, ierr, UofX2) ! parameters
@@ -748,7 +757,7 @@ module prep_wvfn
     real(DP), intent( in ) :: curvi_coord( 3, num_coord )
     complex(DP), intent( in ) :: wvfn(:,:,:,:)
     integer, intent( inout ) :: ierr
-    complex(DP), intent(out) :: UofX2(num_coord, size(wvfn, 4))
+    complex(DP), allocatable, intent(out) :: UofX2(:,:)
     !
     complex(DP), allocatable :: P(:,:), QGrid(:,:), Q(:), RGrid(:)
     real(DP), allocatable :: distanceMap(:,:)
@@ -762,12 +771,13 @@ module prep_wvfn
     order = 4
     nbands = size(wvfn, 4)
 
-    allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
+    ! allocated uofx2
+    allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), UofX2(num_coord, nbands), stat=ierr )
     if( ierr .ne. 0 ) return
       
     dims(1) = size( UofX, 1 )
     dims(2) = size( UofX, 2 )
-    dims(3) = size( UofX, 3 )
+    dims(3) = size( UofX, 3 ) 
 
     do ip = 1, num_coord
       do j = 1, 3
@@ -807,49 +817,35 @@ module prep_wvfn
     ! UofX(nX, nbands)
     ! when doing interpolation, input regular mesh will be 4-dim (x, y, z, bands)
     ! output = coordinate index, nbands
-    ! wvfn
+    ! wvfn 
  
     do ib = 1, nbands
       do ip = 1, num_coord
-      ! fill P array with UofX vals for fixed y and z
+        do iz = 0, order - 1
+          izz = pointMap( 3, ip ) + iz - offset
+          if( izz .gt. dims( 3 ) ) izz = izz - dims( 3 )
+          if( izz .lt. 1 ) izz = izz + dims( 3 )
+
+          do iy = 0, order - 1
+            iyy = pointMap( 2, ip ) + iy - offset
+            if( iyy .gt. dims( 2 ) ) iyy = iyy - dims( 2 )
+            if( iyy .lt. 1 ) iyy = iyy + dims( 2 )
+          enddo ! iy
+        enddo ! iz
+
         do iz = 1, order
-          izz = pointMap(3, ip) + iz - offset
-          if (izz .gt. dims(3)) izz = izz - dims(3)
-          if (izz .lt. 1) izz = izz + dims(3)
-
-          do iy = 1, order
-            iyy = pointMap(2, ip) + iy - offset
-            if (iyy .gt. dims(2)) iyy = iyy - dims(2)
-            if (iyy .lt. 1) iyy = iyy + dims(2)
-            
-            ! interpolate in x dim
-            do i = 1, order
-              ix = pointMap(1, ip) + i - 1 - offset !???
-              if (ix .gt. dims(1)) ix = ix - dims(1)
-              if (ix .lt. 1) ix = ix + dims(1)
-              P(i, 1) = UofX(ix, iyy, izz, ib)
-            enddo
-
-            call makeLagrange(order, P(:, i), Q) ! lagrange polynomial for x
-            QGrid(iy, iz) = evalLagrange(order, distanceMap(1,ip), dx, Q)
-          enddo
+          call makeLagrange( order, P(:,iz), QGrid(:,iz) )
+          Q(iz) = evalLagrange( order, distanceMap( 2, ip ), dy, Qgrid(:,iz) )
         enddo
 
-        ! interpolate in y for every z
-        do iz = 1, order
-          call makeLagrange(order, QGrid(:, iz), Q)
-          RGrid(iz) = evalLagrange(order, distanceMap(2,ip), dy, Q)
-        enddo
-        ! interpolate in z
-        call makeLagrange(order, RGrid, Q)
-        R = evalLagrange(order, distanceMap(3,ip), dz, Q)  
-        
-        ! coordinate, band
-        ! TODO: seg fault
+        call makeLagrange( order, Q, RGrid )
+        R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
+
         UofX2(ip, ib) = R
       enddo ! ip
+
     enddo ! ib
-    
+     
     deallocate( P, Q, QGrid, RGrid )
     deallocate( pointMap, distanceMap )
 

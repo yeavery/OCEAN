@@ -171,8 +171,6 @@ module OCEAN_bloch
   integer :: xiter, ibd, ispn
   pi = 4.0d0 * atan( 1.0d0 )
 
-  print *, "regular subroutine"
-
   do ispn = 1, sys%nspn
     xiter = 0
     do iz = 1, sys%xmesh(3)
@@ -272,15 +270,11 @@ end subroutine regular_lrLOAD
       integer :: i, j
       integer :: xiter, ibd, ispn
 
-      print *, "irregular subroutine"
-
       ! new tau = tau, xshift = what you're shifting every coordinate by
        
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
         xiter = 0
-      ! TODO: is indexing different?
-        !do i = my_start_nx, my_start_nx + my_xpts - 1
         do i = 1, num_coord
           do j = 1, 3
             ! shift the coordinate
@@ -353,8 +347,6 @@ end subroutine regular_lrLOAD
     kpts = my_kpts
     num_bands = my_num_bands
     start_nx = my_start_nx
-
-
   end subroutine OCEAN_bloch_lrINIT
 
   subroutine OCEAN_bloch_init( sys, ierr )
@@ -1203,7 +1195,6 @@ end subroutine regular_lrLOAD
 
         enddo
 
-        !TODO better skips
         do ib = sys%num_bands+1, bandsInFile
           if( myid .eq. root ) then
 !            write(6,*) 'skips:', ib, ikpt
