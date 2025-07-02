@@ -3,12 +3,13 @@ module irreg_grid_check
   ! variable and constant declarations
 
 contains 
-  subroutine check_for_grid( ) ! TODO: figure out parameters
+  subroutine check_for_grid( ierr ) ! TODO: figure out parameters
+          ! might not need any since we're broadcasting the result?
     use OCEAN_mpi
-    use OCEAN_system
     implicit none
 
     ! initialize parameters
+    integer, intent(inout) :: ierr
     real(DP), allocatable :: curvi_coord(:, :)
     logical :: have_curvi
     integer :: i, num_coord
@@ -41,6 +42,7 @@ contains
             if (ierr /= 0) goto 111
     endif
 #endif
-  end subroutine check_for_grid()
+111 continue
+  end subroutine check_for_grid
 
 end module irreg_grid_check

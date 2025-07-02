@@ -10,6 +10,7 @@
 !
 module prep_wvfn
   use AI_kinds, only : DP
+  use irreg_grid_check, only : check_for_grid
 
   implicit none
   private
@@ -99,13 +100,17 @@ module prep_wvfn
     if( ierr .ne. 0 ) return
 
     ! TODO: check for reduced uniform.txt here instead
+    !       update UofX2 allocation so that it's consistently nX
 
-    ! TODO: update UofX2 allocation so that it's consistently nX
     ! need to set the number of x-points proc should epxect locally
     ! probably subroutines/functions in this module
     ! grabbing pool_size and pool_id from ODF
+    
+    !call check_for_grid(ierr)
+    have_curvi = .false.
+
     if (have_curvi) then
-            ! TODO: set nX = prep_svfn_divideXmesh(num_coord, ...)
+            nX = prep_wvfn_divideXmesh(num_coord, nprocPool, poolID)
     else
             nX = prep_wvfn_divideXmesh( product( params%xmesh ), nprocPool, poolID )
     endif
@@ -250,37 +255,6 @@ module prep_wvfn
 #endif
 
         if( wantU2 ) then
-                ! check if custom grid exists
-                if (myid .eq. root ) then
-                        inquire(file='reduced_uniform.txt', exist=have_curvi)
-                        if ( have_curvi ) then
-                                open(unit=99, file='reduced_uniform.txt', form='formatted', status='old', action='read')
-                                ! read number of coordinates from first line
-                                read(99, *) num_coord
-                                allocate( curvi_coord(num_coord, 3) )
-                                do j = 1, num_coord
-                                  read(99, *) curvi_coord(j, 1), curvi_coord(j, 2), curvi_coord(j, 3)
-                                enddo
-                                close(99)
-                        endif
-                endif
-
-#ifdef MPI
-                  call MPI_BCAST(have_curvi, 1, MPI_LOGICAL, 0, comm, ierr)
-
-                  if (ierr /= 0) goto 111
-                  if (have_curvi) then
-                          call MPI_BCAST(num_coord, 1, MPI_INTEGER, 0, comm, ierr)
-                          if (ierr /= 0) goto 111
-                          ! if not root, allocate array of size curvi_coord
-                          if (myid /= 0) then
-                                  allocate( curvi_coord(num_coord, 3) )
-                          endif
-                          call MPI_BCAST(curvi_coord, num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
-                          if (ierr /= 0) goto 111
-                  endif
-#endif
-                
                 if (have_curvi) then
                         call irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
                                 allBands, nX, fileHandle, odf_flag, num_coord, curvi_coord, ierr)

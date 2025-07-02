@@ -7,6 +7,7 @@
 !
 module OCEAN_bloch
   use AI_kinds
+  use irreg_grid_check
 
   save
   private
@@ -70,8 +71,6 @@ module OCEAN_bloch
     integer :: i, num_coord
     logical :: have_curvi
 
-    ! TODO: separate phase shift into 2 helper functions. Keep xshift the same for now.
-
     ! Change phase as if things were flipped around. Don't actually re-distribute
     !
     ! Reasoning for the below;
@@ -111,35 +110,7 @@ module OCEAN_bloch
     tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
-    ! check if custom grid exists like before
-    if (myid .eq. root ) then
-            inquire(file='reduced_uniform.txt', exist=have_curvi)
-            if ( have_curvi ) then
-                    open(unit=99, file='reduced_uniform.txt', form='formatted', status='old', action='read')
-                    ! read number of coordinates from first line
-                    read(99, *) num_coord
-                    allocate( curvi_coord(num_coord, 3) )
-                    do i = 1, num_coord
-                    read(99, *) curvi_coord(i, 1), curvi_coord(i, 2), curvi_coord(i, 3)
-                    enddo
-                    close(99)
-            endif
-    endif
-
-#ifdef MPI
-    call MPI_BCAST(have_curvi, 1, MPI_LOGICAL, 0, comm, ierr)
-    if (ierr /= 0) goto 111
-    if (have_curvi) then
-            call MPI_BCAST(num_coord, 1, MPI_INTEGER, 0, comm, ierr)
-            if (ierr /= 0) goto 111
-            ! if not root, allocate array of size curvi_coord
-            if (myid /= 0) then
-                    allocate( curvi_coord(num_coord, 3) )
-            endif
-            call MPI_BCAST(curvi_coord, num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
-            if (ierr /= 0) goto 111
-    endif
-#endif
+    call check_for_grid(ierr)
     if (have_curvi) then
             call irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )
             if (ierr /= 0) goto 111
