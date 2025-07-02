@@ -254,17 +254,22 @@ module prep_wvfn
         endif
 #endif
 
-        if( wantU2 ) then
-                if (have_curvi) then
-                        call irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
-                                allBands, nX, fileHandle, odf_flag, num_coord, curvi_coord, ierr)
-                        if (ierr /= 0) goto 111
-                        deallocate(curvi_coord)
+        if (wantU2) then
+                if (ikpt .ne. 0) then
+                        allocate(UofX(params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands), UofX2(nX, allBands))
+                        if (have_curvi) then
+                                call irregular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
+                                        allBands, nX, fileHandle, odf_flag, UofX, UofX2, num_coord, curvi_coord, ierr)
+                                if (ierr /= 0) goto 111
+                                deallocate(curvi_coord)
+                        else
+                                call regular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
+                                        allBands, nX, fileHandle, odf_flag, UofX, UofX2, ierr)
+                                if (ierr /= 0) goto 111
+                        endif
                 else
-                        call regular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
-                                allBands, nX, fileHandle, odf_flag, ierr )
-                        if (ierr /= 0) goto 111
-                endif
+                        allocate( UofX( 0, 0, 0, 0 ), UofX2( 0, 0 ) )
+                endif 
 
                 if (perKptU2) then
                         call prep_wvfn_writeU2_perKpt( ikpt, ispin, UofX2, fileHandle, ierr )
@@ -272,7 +277,9 @@ module prep_wvfn
                         call prep_wvfn_writeU2( ikpt, ispin, UofX2, fileHandle, ierr )
                 endif
                 if (ierr .ne. 0) return
-                !deallocate( UofX, UofX2 )
+                deallocate( UofX, UofX2 )
+                print *, "deallocated UofX, UofX2"
+
         endif
 
         ! if doing CKS then compute matrix elements here
@@ -395,83 +402,74 @@ module prep_wvfn
   end subroutine prep_wvfn_driver
 
   subroutine irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, &
-                  odf_flag, num_coord, curvi_coord, ierr )
+                  odf_flag, UofX, UofX2, num_coord, curvi_coord, ierr )
     use prep_system, only : system_parameters, params, prep_system_ikpt2kvec, calculation_parameters, prep_system_umklapp
     integer, intent(in) :: ikpt, ispin, nG, nbands, allBands, nX, fileHandle, odf_flag
+    complex(DP), intent(out) :: UofX(:,:,:,:), UofX2(:,:)
+
     integer, pointer :: gvecPointer(:,:)
     complex(DP), pointer :: UofGPointer(:,:)
     integer, intent(inout) :: ierr
     integer, intent(in) :: num_coord
     real(DP), intent(inout) :: curvi_coord(:, :)
-    complex(DP), allocatable :: wvfn(:,:,:,:), UofX(:,:,:,:), UofX2(:,:)
+    complex(DP), allocatable :: wvfn(:,:,:,:)
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
     logical :: wantU2 = .true.
 
     ! check FFT without resizing
-    if ( ikpt .ne. 0 ) then
-            call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
-            
-            nband_chunk = 1
-            allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
-            allocate( UofX( params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands ) )
-            nchunk = ( nbands - 1 ) / nband_chunk + 1
+    call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
+    nband_chunk = 1
+    allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
+    nchunk = ( nbands - 1 ) / nband_chunk + 1
+    do ichunk = 1, nchunk
+      nband_todo = min( nband_chunk, nbands - ( ichunk - 1 )*nband_chunk )
+      ib = (ichunk-1)*nband_chunk+1
+      ! don't need to change this function
+      call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
+      ib2 = ib + nband_todo - 1
+      ! TODO: test u1
+      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr, UofX2 )
+      if ( ierr .ne. 0 ) return
+    enddo
 
-            do ichunk = 1, nchunk
-              nband_todo = min( nband_chunk, nbands - ( ichunk - 1 )*nband_chunk )
-              ib = (ichunk-1)*nband_chunk+1
-              ! don't need to change this function
-              call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
-              ib2 = ib + nband_todo - 1
-              ! TODO: test u1
-              call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr, UofX2 )
-              if ( ierr .ne. 0 ) return
-            enddo
-
-            deallocate( wvfn )
-            ! TODO: use different array in u1 (maybe UofX?) if same, don't allocate again
-            !allocate( UofX2( nX, allBands ) )
-
-            ! TODO: modify u2 (gram-schmidt) -- crashed here
-            call prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
-            if ( ierr .ne. 0 ) return
-    else
-            allocate( UofX( 0, 0, 0, 0 ), UofX2( 0, 0 ) )
-    endif
+    deallocate( wvfn )
+    ! TODO: modify u2 (gram-schmidt) -- crashed here
+    call prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
+    if ( ierr .ne. 0 ) return
   end subroutine irregular_prep_wvfn_driver
   
-  subroutine regular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, odf_flag, ierr )
+  subroutine regular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, &
+                  odf_flag, UofX, UofX2, ierr )
     use prep_system, only : system_parameters, params, prep_system_ikpt2kvec, calculation_parameters, prep_system_umklapp
     integer, intent(in) :: ikpt, ispin, nG, nbands, allBands, nX, fileHandle, odf_flag
+    complex(DP), intent(out) :: UofX(:,:,:,:), UofX2(:,:)
+
     integer, pointer :: gvecPointer(:,:)
     complex(DP), pointer :: UofGPointer(:,:)
     integer, intent(inout) :: ierr
-    complex(DP), allocatable :: wvfn(:,:,:,:), UofX(:,:,:,:), UofX2(:,:)
+    complex(DP), allocatable :: wvfn(:,:,:,:)
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
     logical :: wantU2 = .true.
-    
-    if ( ikpt .ne. 0 ) then
-            call prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
-            nband_chunk = 1
-            allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
-            allocate( UofX( params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands ) )
-            nchunk = ( nbands - 1 ) / nband_chunk + 1
-                     
-            do ichunk = 1, nchunk
-              nband_todo = min( nband_chunk, nbands - ( ichunk - 1 )*nband_chunk )
-              ib = (ichunk-1)*nband_chunk+1
-              call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
-              ib2 = ib + nband_todo - 1
-              call prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), ierr )       
-              if ( ierr .ne. 0 ) return
-            enddo
 
-            deallocate( wvfn )
-            allocate( UofX2( nX, allBands ) )
-            call prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
-            if ( ierr .ne. 0 ) return
-    else
-            allocate( UofX( 0, 0, 0, 0 ), UofX2( 0, 0 ) )
-    endif
+    print *, "entered regular prep driver"
+    
+    call prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
+    nband_chunk = 1
+    allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
+    nchunk = ( nbands - 1 ) / nband_chunk + 1
+                     
+    do ichunk = 1, nchunk
+      nband_todo = min( nband_chunk, nbands - ( ichunk - 1 )*nband_chunk )
+      ib = (ichunk-1)*nband_chunk+1
+      call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
+      ib2 = ib + nband_todo - 1
+      call prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), ierr )       
+      if ( ierr .ne. 0 ) return
+    enddo
+    deallocate(wvfn)
+            
+    call prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
+    if ( ierr .ne. 0 ) return
   end subroutine regular_prep_wvfn_driver
 
   subroutine prep_wvfn_writeEnergies( ierr )
@@ -705,33 +703,17 @@ module prep_wvfn
   end subroutine prep_wvfn_closeU2
 
   subroutine irregular_prep_wvfn_u1( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2 )
-    ! TODO: params? interpolation req. npts, nbands, iband, uofx
-    ! don't need avecs, qcart, Pgrid, isInitGrid
-    complex(DP), intent(inout) :: wvfn(:,:,:,:)
-    complex(DP), intent(in) :: UofX(:,:,:,:)
-    real(DP), intent(in) :: curvi_coord(:,:)
-    integer, intent(in) :: num_coord
-    integer, intent(inout) :: ierr
-    complex(DP), allocatable, intent(out) :: UofX2(:,:)
-
-    ! base off of swl_ComplexDoLagrange (line 2468 of SCREEN/src/screen_wvfn_converter.f90)
-    call irregular_interpolation(wvfn, UofX, num_coord, curvi_coord, ierr, UofX2) ! parameters
-
-  end subroutine irregular_prep_wvfn_u1
-
-  subroutine irregular_interpolation( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2 )
-    ! call in irregular_prep_wvfn_u1
     use ocean_constants, only : pi_dp
     use ocean_mpi, only : myid
     use ocean_interpolate
-    ! only pass in array of values, return interpolant that you then evaluate
-
-    integer, intent( in ) :: num_coord
-    complex(DP), intent( in ) :: UofX(:,:,:,:)
-    real(DP), intent( in ) :: curvi_coord( 3, num_coord )
-    complex(DP), intent( in ) :: wvfn(:,:,:,:)
-    integer, intent( inout ) :: ierr
-    complex(DP), allocatable, intent(out) :: UofX2(:,:)
+    ! don't need avecs, qcart, Pgrid, isInitGrid
+    ! base off of swl_ComplexDoLagrange (line 2468 of SCREEN/src/screen_wvfn_converter.f90)
+    complex(DP), intent(inout) :: wvfn(:,:,:,:)
+    complex(DP), intent(in) :: UofX(:,:,:,:)
+    integer, intent(in) :: num_coord
+    real(DP), intent(in) :: curvi_coord(3,num_coord)
+    integer, intent(inout) :: ierr
+    complex(DP), intent(out) :: UofX2(:,:)
     !
     complex(DP), allocatable :: P(:,:), QGrid(:,:), Q(:), RGrid(:)
     real(DP), allocatable :: distanceMap(:,:)
@@ -746,7 +728,7 @@ module prep_wvfn
     nbands = size(wvfn, 4)
 
     ! allocated uofx2
-    allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), UofX2(num_coord, nbands), stat=ierr )
+    allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
     if( ierr .ne. 0 ) return
       
     dims(1) = size( UofX, 1 )
@@ -823,7 +805,7 @@ module prep_wvfn
     deallocate( P, Q, QGrid, RGrid )
     deallocate( pointMap, distanceMap )
 
-  end subroutine irregular_interpolation
+  end subroutine irregular_prep_wvfn_u1
 
   subroutine prep_wvfn_u1( wvfn, UofX, ierr )
     use ocean_mpi, only : myid
