@@ -889,7 +889,7 @@ module prep_wvfn
   end subroutine prep_wvfn_u1
 
   subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, num_coord, ierr)
-    ! TODO
+    ! TODO: replicate prep wvfn u2 up to test section
     ! don't need to downsize (UofX -> UofX2)
     ! modified gram schmidt + dot product with weight of volume element
     ! test: print out sum of wvfn^2 * integration weight
@@ -901,23 +901,25 @@ module prep_wvfn
     complex(DP), intent(in) :: UofX(:,:,:,:)
     complex(DP), intent(in) :: UofX2(:,:)
     real(DP) :: A, B
-    integer :: j
-    complex(DP) :: uvec(size(UofX2, 2))
-    B = 0
-    print *, "size of UofX2=", size(UofX2, 1), size(UofX2, 2)
-
-    ! test
-    do j = 1, num_coord
-      ! sum over bloch function
-      uvec = UofX2(j, :)
-      A = dot_product(uvec, uvec)
-      B = B + A
+    integer :: iband, ipts
+    integer :: nbands
+    A = 0
+    nbands = size(UofX, 4)
+    ! or size(wvfn, 4), try both
+    ! uvec = column vectors of UofX2
+    do iband = 1, nbands
+      uvec = UofX2(:,iband)
+      ! this sum is the same as taking the dot product
+      do ipts = 1, num_coord
+        A = A + UofX2(ipts, iband)
+      enddo
+      !A = dot_product(uvec, uvec)
       print *, "A =", A
     enddo
-    print *, "B =", B
   end subroutine irregular_prep_wvfn_u2
 
   subroutine prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
+    ! START IRREG REPLICATE
     use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_SUM, MPI_IN_PLACE, myid
     use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
 
@@ -1006,6 +1008,8 @@ module prep_wvfn
     deallocate( req )
     nband = size( UofX2, 2 )
     allocate( coeff( nband ) )
+
+    ! TODO: END IRREG REPLICATE
 
 #if 0
 !TEST
