@@ -238,6 +238,7 @@ module prep_wvfn
     allBands = params%brange(2) - params%brange(1) + 1
     
     do i = 1, 2
+        write(6,*) '!!!!!!', i
 #if 0
         if( ikpt .ne. 0 ) then
           call prep_wvfn_checkFFT( nG, gvecPointer, wantCKS, wantU2, fftGrid, ierr )
@@ -260,7 +261,6 @@ module prep_wvfn
                                 call irregular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
                                         allBands, nX, fileHandle, odf_flag, UofX, UofX2, num_coord, curvi_coord, ierr)
                                 if (ierr /= 0) goto 111
-                                deallocate(curvi_coord)
                         else
                                 call regular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
                                         allBands, nX, fileHandle, odf_flag, UofX, UofX2, ierr)
@@ -345,6 +345,9 @@ module prep_wvfn
 
     enddo ! iuni ( combined spin and kpt )
 
+    ! deallocate curvi coord after iuni loop
+    if (have_curvi) deallocate(curvi_coord)
+
 
     call prep_wvfn_closeU2( valFH, ierr, vtype )
     call prep_wvfn_closeU2( conFH, ierr, ctype )
@@ -424,14 +427,14 @@ module prep_wvfn
       ! don't need to change this function
       call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
       ib2 = ib + nband_todo - 1
-      ! TODO: test u1
-      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr, UofX2 )
+      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr, UofX2, nX )
+
       if ( ierr .ne. 0 ) return
     enddo
 
     deallocate( wvfn )
-    ! TODO: modify u2 (gram-schmidt) -- crashed here
-    call prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
+    ! TODO: modify u2 (gram-schmidt)
+    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
     if ( ierr .ne. 0 ) return
   end subroutine irregular_prep_wvfn_driver
   
@@ -697,7 +700,7 @@ module prep_wvfn
 #endif
   end subroutine prep_wvfn_closeU2
 
-  subroutine irregular_prep_wvfn_u1( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2 )
+  subroutine irregular_prep_wvfn_u1( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2, nX )
     use ocean_constants, only : pi_dp
     use ocean_mpi, only : myid
     use ocean_interpolate
@@ -709,6 +712,7 @@ module prep_wvfn
     real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(inout) :: ierr
     complex(DP), intent(out) :: UofX2(:,:)
+    integer, intent(in) :: nX
     !
     complex(DP), allocatable :: P(:,:), QGrid(:,:), Q(:), RGrid(:)
     real(DP), allocatable :: distanceMap(:,:)
@@ -722,15 +726,16 @@ module prep_wvfn
     order = 4
     nbands = size(wvfn, 4)
 
-    ! allocated uofx2
     allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
     if( ierr .ne. 0 ) return
       
     dims(1) = size( UofX, 1 )
     dims(2) = size( UofX, 2 )
-    dims(3) = size( UofX, 3 ) 
+    dims(3) = size( UofX, 3 )
 
+    write(6,*) '!', shape( curvi_coord ), num_coord
     do ip = 1, num_coord
+       
       do j = 1, 3
         rvec(j) = curvi_coord(j, ip)
       enddo
@@ -746,12 +751,14 @@ module prep_wvfn
 
       ! for 4th order want index=2 to be just below
       pointMap(:, ip) = 1 + floor(rvec(:) * real(dims(:), DP))
+
       do j = 1, 3
         if (pointMap(j, ip) .lt. 1) pointMap(j, ip) = pointMap(j, ip) + dims(j)
         if (pointMap(j, ip) .gt. dims(j)) pointMap(j, ip) = pointMap(j, ip) - dims(j)
       enddo
 
       distanceMap(:, ip) = ( rvec( : ) * real( dims(:), DP ) - floor( rvec( : ) * real( dims(:), DP ) ) ) / real(dims( : ), DP ) 
+
     enddo
 
     if (mod(order, 2) .eq. 1) then
@@ -771,7 +778,7 @@ module prep_wvfn
     ! wvfn 
  
     do ib = 1, nbands
-      do ip = 1, num_coord
+    do ip = 1, num_coord
         do iz = 0, order - 1
           izz = pointMap( 3, ip ) + iz - offset
           if( izz .gt. dims( 3 ) ) izz = izz - dims( 3 )
@@ -794,7 +801,6 @@ module prep_wvfn
 
         UofX2(ip, ib) = R
       enddo ! ip
-
     enddo ! ib
      
     deallocate( P, Q, QGrid, RGrid )
@@ -882,6 +888,10 @@ module prep_wvfn
 
   end subroutine prep_wvfn_u1
 
+  subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, ierr)
+    ! TODO
+  end subroutine irregular_prep_wvfn_u2
+
   subroutine prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
     use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_SUM, MPI_IN_PLACE, myid
     use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
@@ -917,8 +927,7 @@ module prep_wvfn
     
     ! Loop through every pool and post receives
     iband = 1
-    do iprocPool = 0, nprocPool - 1
-      
+    do iprocPool = 0, nprocPool - 1 
       nband = odf_getBandsForPoolID( iprocPool, odf_flag )
       if( debug ) write(1000+myid,*) 'UofX2 recvs:', iprocPool, nx, nband, totdim
       call MPI_IRECV( UofX2(:,iband:), nX*nband, MPI_DOUBLE_COMPLEX, iprocPool, 1, pool_comm, & 

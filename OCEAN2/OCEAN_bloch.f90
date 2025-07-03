@@ -110,7 +110,7 @@ module OCEAN_bloch
     tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
-    call check_for_grid(ierr)
+    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
     if (have_curvi) then
             call irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )
             if (ierr /= 0) goto 111
