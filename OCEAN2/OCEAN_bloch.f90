@@ -249,12 +249,12 @@ end subroutine regular_lrLOAD
         do i = 1, num_coord
           do j = 1, 3
             ! shift the coordinate
-            curvi_coord(i, j) = curvi_coord(i, j) - xshift(j)
+            curvi_coord(j, i) = curvi_coord(j, i) - xshift(j)
             ! move it back into the unit cell
-            if (curvi_coord(i, j) < 0) then 
-                    curvi_coord(i, j) = curvi_coord(i, j) + 1
-            elseif (curvi_coord(i, j) > 1) then
-                    curvi_coord(i, j) = curvi_coord(i, j) - 1
+            if (curvi_coord(j, i) < 0) then 
+                    curvi_coord(j, i) = curvi_coord(j, i) + 1
+            elseif (curvi_coord(j, i) > 1) then
+                    curvi_coord(j, i) = curvi_coord(j, i) - 1
             endif
           enddo
           
@@ -274,7 +274,7 @@ end subroutine regular_lrLOAD
                 qvec(3) = real(iq3 - 1, DP) / real(sys%kmesh(3), DP)
 
                 ! calculate phase shift: 2pi * (kvec dot coordinate)
-                phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(i, :)) 
+                phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(:, i)) 
                 cphs = dcos(phs_tot)
                 sphs = dsin(phs_tot)
                 if (use_sp) then

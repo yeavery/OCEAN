@@ -106,8 +106,7 @@ module prep_wvfn
     ! probably subroutines/functions in this module
     ! grabbing pool_size and pool_id from ODF
     
-    !call check_for_grid(ierr)
-    have_curvi = .false.
+    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
 
     if (have_curvi) then
             nX = prep_wvfn_divideXmesh(num_coord, nprocPool, poolID)
@@ -278,8 +277,6 @@ module prep_wvfn
                 endif
                 if (ierr .ne. 0) return
                 deallocate( UofX, UofX2 )
-                print *, "deallocated UofX, UofX2"
-
         endif
 
         ! if doing CKS then compute matrix elements here
@@ -450,8 +447,6 @@ module prep_wvfn
     complex(DP), allocatable :: wvfn(:,:,:,:)
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
     logical :: wantU2 = .true.
-
-    print *, "entered regular prep driver"
     
     call prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
     nband_chunk = 1
@@ -711,7 +706,7 @@ module prep_wvfn
     complex(DP), intent(inout) :: wvfn(:,:,:,:)
     complex(DP), intent(in) :: UofX(:,:,:,:)
     integer, intent(in) :: num_coord
-    real(DP), intent(in) :: curvi_coord(3,num_coord)
+    real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(inout) :: ierr
     complex(DP), intent(out) :: UofX2(:,:)
     !
