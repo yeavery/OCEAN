@@ -1659,6 +1659,7 @@ module ocean_long_range
   subroutine lr_populate_W2( sys, ierr )
     use OCEAN_mpi!, only : myid, comm, root
     use OCEAN_system
+    use irreg_grid_check
 !    use mpi
     implicit none
 
@@ -1710,20 +1711,6 @@ module ocean_long_range
         write(6,*) 'Isolated system with cutoff (Bohr):', iso_cut
       endif
 
-      ! IRREGULAR GRID
-      ! open file and read it into an array
-      inquire(file='reduced_uniform.txt', exist=have_curvi)        
-      if ( have_curvi ) then
-        open(unit=99, file='reduced_uniform.txt', form='formatted', status='old', action='read')
-        ! read number of coordinates from first line
-        read(99, *) num_coord
-        allocate( curvi_coord(num_coord, 3) )
-        do i = 1, num_coord
-          read(99, *) curvi_coord(i, 1), curvi_coord(i, 2), curvi_coord(i, 3)
-        enddo
-        close(99)
-      endif
-
       inquire(file='pbc.inp',exist=have_pbc)
       if( have_pbc ) then
         open(unit=99,file='pbc.inp',form='formatted',status='old' )
@@ -1754,24 +1741,14 @@ module ocean_long_range
     call MPI_BCAST( pbc, 3, MPI_INTEGER, 0, comm, ierr )
     if( ierr /= 0 ) goto 111
 
-    ! IRREGULAR GRID
-    call MPI_BCAST(have_curvi, 1, MPI_LOGICAL, 0, comm, ierr)
-    if (ierr /= 0) goto 111
-    if (have_curvi) then
-      call MPI_BCAST(num_coord, 1, MPI_INTEGER, 0, comm, ierr)
-      if (ierr /= 0) goto 111
-      ! if not root, allocate array of size curvi_coord
-      if (myid /= 0) then
-         allocate( curvi_coord(num_coord, 3) )
-      endif
-      call MPI_BCAST(curvi_coord, num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
-      if (ierr /= 0) goto 111
-    endif
 #endif
+
+    ! Irregular grid
+    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
     if (have_curvi) then
             call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr, num_coord, curvi_coord )
             if (ierr /= 0) goto 111
-            deallocate( curvi_coord )
+            deallocate(curvi_coord)
     else
             call regular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr)
             if (ierr /= 0) goto 111
@@ -1925,9 +1902,9 @@ module ocean_long_range
     if( myid .eq. root ) write(6,*) 'Tau: ', my_tau(:), my_xshift(:)
     xiter = 0
     do i = 1, num_coord
-    fr( 1 ) = curvi_coord(i, 1)
-    fr( 2 ) = curvi_coord(i, 2)
-    fr( 3 ) = curvi_coord(i, 3)
+    fr( 1 ) = curvi_coord(1, i)
+    fr( 2 ) = curvi_coord(2, i)
+    fr( 3 ) = curvi_coord(3, i)
     xiter = xiter + 1
     if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
             kiter = 0

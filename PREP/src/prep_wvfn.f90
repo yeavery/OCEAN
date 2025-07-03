@@ -434,7 +434,7 @@ module prep_wvfn
 
     deallocate( wvfn )
     ! TODO: modify u2 (gram-schmidt)
-    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
+    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, num_coord, ierr )
     if ( ierr .ne. 0 ) return
   end subroutine irregular_prep_wvfn_driver
   
@@ -888,8 +888,33 @@ module prep_wvfn
 
   end subroutine prep_wvfn_u1
 
-  subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, ierr)
+  subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, num_coord, ierr)
     ! TODO
+    ! don't need to downsize (UofX -> UofX2)
+    ! modified gram schmidt + dot product with weight of volume element
+    ! test: print out sum of wvfn^2 * integration weight
+    !       confirm that they're similar to each other
+    ! rescale (normalize): multiply by 1/sqrt(result)
+    integer, intent(inout) :: ierr
+    integer, intent(in) :: odf_flag
+    integer, intent(in) :: num_coord
+    complex(DP), intent(in) :: UofX(:,:,:,:)
+    complex(DP), intent(in) :: UofX2(:,:)
+    real(DP) :: A, B
+    integer :: j
+    complex(DP) :: uvec(size(UofX2, 2))
+    B = 0
+    print *, "size of UofX2=", size(UofX2, 1), size(UofX2, 2)
+
+    ! test
+    do j = 1, num_coord
+      ! sum over bloch function
+      uvec = UofX2(j, :)
+      A = dot_product(uvec, uvec)
+      B = B + A
+      print *, "A =", A
+    enddo
+    print *, "B =", B
   end subroutine irregular_prep_wvfn_u2
 
   subroutine prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
