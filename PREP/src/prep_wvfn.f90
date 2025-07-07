@@ -99,8 +99,7 @@ module prep_wvfn
     call prep_wvfn_openU2( 'con', conFH, allBands, nx, poolID, nprocPool, ierr, ctype )
     if( ierr .ne. 0 ) return
 
-    ! TODO: check for reduced uniform.txt here instead
-    !       update UofX2 allocation so that it's consistently nX
+    ! TODO: update UofX2 allocation so that it's consistently nX
 
     ! need to set the number of x-points proc should epxect locally
     ! probably subroutines/functions in this module
@@ -259,7 +258,7 @@ module prep_wvfn
                         allocate(UofX(params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands), UofX2(nX, allBands))
                         if (have_curvi) then
                                 call irregular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
-                                        allBands, nX, fileHandle, odf_flag, UofX, UofX2, num_coord, curvi_coord, ierr)
+                                        allBands, nX, fileHandle, odf_flag, UofX2, num_coord, curvi_coord, ierr)
                                 if (ierr /= 0) goto 111
                         else
                                 call regular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
@@ -402,11 +401,10 @@ module prep_wvfn
   end subroutine prep_wvfn_driver
 
   subroutine irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, &
-                  odf_flag, UofX, UofX2, num_coord, curvi_coord, ierr )
+                  odf_flag, UofX2, num_coord, curvi_coord, ierr )
     use prep_system, only : system_parameters, params, prep_system_ikpt2kvec, calculation_parameters, prep_system_umklapp
     integer, intent(in) :: ikpt, ispin, nG, nbands, allBands, nX, fileHandle, odf_flag
-    complex(DP), intent(out) :: UofX(:,:,:,:), UofX2(:,:)
-
+    complex(DP), intent(out) :: UofX2(:,:)
     integer, pointer :: gvecPointer(:,:)
     complex(DP), pointer :: UofGPointer(:,:)
     integer, intent(inout) :: ierr
@@ -416,10 +414,16 @@ module prep_wvfn
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
     logical :: wantU2 = .true.
 
+    complex(DP), allocatable :: UofX(:,:)
+
+    !uofX2 has size (nX, allBands)
     ! check FFT without resizing
     call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
     nband_chunk = 1
     allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
+    ! todo: where tf did UofX allocation go
+    allocate(UofX(num_coord, nbands))
+
     nchunk = ( nbands - 1 ) / nband_chunk + 1
     do ichunk = 1, nchunk
       nband_todo = min( nband_chunk, nbands - ( ichunk - 1 )*nband_chunk )
@@ -427,15 +431,24 @@ module prep_wvfn
       ! don't need to change this function
       call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
       ib2 = ib + nband_todo - 1
-      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), num_coord, curvi_coord, ierr, UofX2, nX )
-
+      ! todo: interpolation onto UofX instead of UofX2
+      ! MPI logic will be simpler
+      ! increment ix by nX and delete rollover things
+      ! MPI WAITALL: write statements before and after this line
+      !         if it waits for > few sec, have to debug
+      write(6,*) 'ipwu1', ikpt, ib
+      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), num_coord, curvi_coord, ierr, UofX(:, ib:ib2), nX )
+      write(6,*) 'ipwu done'
       if ( ierr .ne. 0 ) return
     enddo
 
-    deallocate( wvfn )
+    !deallocate( wvfn )
+    WRITE(6,*) 'GS time', ikpt
     ! TODO: modify u2 (gram-schmidt)
     call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, num_coord, ierr )
     if ( ierr .ne. 0 ) return
+    write(6,*) 'GS done'
+    deallocate(wvfn, UofX)
   end subroutine irregular_prep_wvfn_driver
   
   subroutine regular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, &
@@ -700,7 +713,7 @@ module prep_wvfn
 #endif
   end subroutine prep_wvfn_closeU2
 
-  subroutine irregular_prep_wvfn_u1( wvfn, num_coord, curvi_coord, ierr, UofX2, nX )
+  subroutine irregular_prep_wvfn_u1( wvfn, num_coord, curvi_coord, ierr, UofX, nX )
     use ocean_constants, only : pi_dp
     use ocean_mpi, only : myid
     use ocean_interpolate
@@ -710,7 +723,7 @@ module prep_wvfn
     integer, intent(in) :: num_coord
     real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(inout) :: ierr
-    complex(DP), intent(out) :: UofX2(:,:)
+    complex(DP), intent(out) :: UofX(:,:)
     integer, intent(in) :: nX
     !
     complex(DP), allocatable :: PGrid(:), P(:,:), QGrid(:,:), Q(:), RGrid(:)
@@ -796,7 +809,8 @@ module prep_wvfn
 
         call makeLagrange( order, Q, RGrid )
         R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
-        UofX2(ip, ib) = R
+        !print *, "R", R
+        UofX(ip, ib) = R
 
       enddo ! ip
     enddo ! ib
@@ -891,7 +905,7 @@ module prep_wvfn
     use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_DOUBLE_PRECISION, MPI_LOGICAL, MPI_SUM, MPI_IN_PLACE, myid, comm, root
     use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
 
-    complex(DP), intent( in ) :: UofX(:,:,:,:)
+    complex(DP), intent( in ) :: UofX(:,:)
     complex(DP), intent( out ) :: UofX2(:,:)
     integer, intent( in ) :: odf_flag, num_coord
     integer, intent(inout ) :: ierr
@@ -918,10 +932,7 @@ module prep_wvfn
 
     nX = size( UofX2, 1 )
 
-    xdim = size( UofX, 1 )
-    ydim = size( UofX, 2 )
-    zdim = size( UofX, 3 )
-    totdim = xdim * ydim * zdim
+    totdim = size( UofX, 1 )
 
     ! Loop through every pool and post receives
     iband = 1
@@ -930,60 +941,21 @@ module prep_wvfn
       if( debug ) write(1000+myid,*) 'UofX2 recvs:', iprocPool, nx, nband, totdim
       call MPI_IRECV( UofX2(:,iband:), nX*nband, MPI_DOUBLE_COMPLEX, iprocPool, 1, pool_comm, &
                       req( iprocPool, 1 ), ierr )
+      call MPI_ISEND(UofX(:, iband), nX*nband, MPI_DOUBLE_COMPLEX, iprocPool, 1, pool_comm, &
+              req(iprocPool, 2), ierr)
       if( ierr .ne. 0 ) return
-
       iband = iband + nband
     enddo
 
-    call MPI_BARRIER( pool_comm, ierr )
-    if( ierr .ne. 0 ) return
-
-    iz = 1
-    iy = 1
-    ix = 1
-    nband = odf_getBandsForPoolID( mypool, odf_flag )
-
-    do iprocPool = 0, nprocPool - 1
-      nX = prep_wvfn_divideXmesh( totdim, nprocPool, iprocPool )
-
-      call MPI_TYPE_VECTOR( nband, nX, totdim, MPI_DOUBLE_COMPLEX, newType, ierr )
-      if( ierr .ne. 0 ) return
-      call MPI_TYPE_COMMIT( newType, ierr )
-      if( ierr .ne. 0 ) return
-
-      if( debug ) then
-        write(1000+myid,*) 'UofX2 sends:', iprocPool, nx, nband
-        write(1000+myid,*) '            ', ix, iy, iz
-      endif
-      call MPI_ISEND( UofX( ix, iy, iz, 1 ), 1, newType, iprocPool, 1, pool_comm, req( iprocPool, 2 ), ierr )
-      if( ierr .ne. 0 ) return
-
-      call MPI_TYPE_FREE( newType, ierr )
-      if( ierr .ne. 0 ) return
-
-      ix = ix + nX
-      do while( ix .gt. xdim )
-        ix = ix - xdim
-        iy = iy + 1
-      enddo
-      do while( iy .gt. ydim )
-        iy = iy - ydim
-        iz = iz + 1
-      enddo
-    enddo
-
+    write(6,*) "about to call waitall"
     call MPI_WAITALL( nprocPool * 2, req, MPI_STATUSES_IGNORE, ierr )
     if( ierr .ne. 0 ) return
+    write(6,*) "called waitall"
 
     deallocate( req )
     nband = size( UofX2, 2 )
     allocate( coeff( nband ) )
-
-    ! END IRREG REPLICATE
-    ! don't need to downsize (UofX -> UofX2)
     ! modified gram schmidt + dot product with weight of volume element
-    ! test: print out sum of wvfn^2 * integration weight
-    !       confirm that they're similar to each other
     ! rescale (normalize): multiply by 1/sqrt(result)
 
     ! check for integration weight file
@@ -1018,12 +990,12 @@ module prep_wvfn
 
     A = 0
     do iband = 1, nband
-      ! this sum is the same as taking the dot product
+      ! take the dot product
       do ipts = 1, num_coord
         u = UofX2(ipts,iband)
-        A = A + conjg(u) * u * weights(ipts) ! todo: multiply by integration weight
+        A = A + conjg(u) * u * weights(ipts)
       enddo
-      !A = 1 / sqrt(A)
+      A = 1 / sqrt(A)
       print *, "A", A
       UofX2(:,iband) = UofX2(:,iband) * A
       A = 0
