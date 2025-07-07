@@ -427,7 +427,7 @@ module prep_wvfn
       ! don't need to change this function
       call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
       ib2 = ib + nband_todo - 1
-      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), UofX(:,:,:,ib:ib2), num_coord, curvi_coord, ierr, UofX2, nX )
+      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), num_coord, curvi_coord, ierr, UofX2, nX )
 
       if ( ierr .ne. 0 ) return
     enddo
@@ -700,21 +700,20 @@ module prep_wvfn
 #endif
   end subroutine prep_wvfn_closeU2
 
-  subroutine irregular_prep_wvfn_u1( wvfn, UofX, num_coord, curvi_coord, ierr, UofX2, nX )
+  subroutine irregular_prep_wvfn_u1( wvfn, num_coord, curvi_coord, ierr, UofX2, nX )
     use ocean_constants, only : pi_dp
     use ocean_mpi, only : myid
     use ocean_interpolate
     ! don't need avecs, qcart, Pgrid, isInitGrid
     ! base off of swl_ComplexDoLagrange (line 2468 of SCREEN/src/screen_wvfn_converter.f90)
     complex(DP), intent(inout) :: wvfn(:,:,:,:)
-    complex(DP), intent(in) :: UofX(:,:,:,:)
     integer, intent(in) :: num_coord
     real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(inout) :: ierr
     complex(DP), intent(out) :: UofX2(:,:)
     integer, intent(in) :: nX
     !
-    complex(DP), allocatable :: P(:,:), QGrid(:,:), Q(:), RGrid(:)
+    complex(DP), allocatable :: PGrid(:), P(:,:), QGrid(:,:), Q(:), RGrid(:)
     real(DP), allocatable :: distanceMap(:,:)
     integer, allocatable :: pointMap(:,:)
     !
@@ -729,9 +728,9 @@ module prep_wvfn
     allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
     if( ierr .ne. 0 ) return
       
-    dims(1) = size( UofX, 1 )
-    dims(2) = size( UofX, 2 )
-    dims(3) = size( UofX, 3 )
+    dims(1) = size( wvfn, 1 )
+    dims(2) = size( wvfn, 2 )
+    dims(3) = size( wvfn, 3 )
 
     write(6,*) '!', shape( curvi_coord ), num_coord
     do ip = 1, num_coord
@@ -767,29 +766,28 @@ module prep_wvfn
             offset = order / 2 - 1
     endif
 
-    allocate( P(order,order), QGrid(order,order), Q(order), RGrid(order) )
+    allocate( PGrid(order), P(order,order), QGrid(order,order), Q(order), RGrid(order) )
     dx = 1.0_dp / dims( 1 )
     dy = 1.0_dp / dims( 2 )
-    dz = 1.0_dp / dims( 3 )
-
-    ! UofX(nX, nbands)
-    ! when doing interpolation, input regular mesh will be 4-dim (x, y, z, bands)
-    ! output = coordinate index, nbands
-    ! wvfn 
+    dz = 1.0_dp / dims( 3 ) 
  
+    ! NEW LOOP
+    ! don't need first iz/iy, move makelagrange PGrid here, allocate PGrid(order) <- 1D array
     do ib = 1, nbands
-    do ip = 1, num_coord
-        do iz = 0, order - 1
-          izz = pointMap( 3, ip ) + iz - offset
+      do ip = 1, num_coord
+        do iz = 1, order
+          izz = pointMap( 3, ip ) + iz - 1 - offset
           if( izz .gt. dims( 3 ) ) izz = izz - dims( 3 )
           if( izz .lt. 1 ) izz = izz + dims( 3 )
 
-          do iy = 0, order - 1
-            iyy = pointMap( 2, ip ) + iy - offset
+          do iy = 1, order
+            iyy = pointMap( 2, ip ) + iy - 1 - offset
             if( iyy .gt. dims( 2 ) ) iyy = iyy - dims( 2 )
             if( iyy .lt. 1 ) iyy = iyy + dims( 2 )
-          enddo ! iy
-        enddo ! iz
+            call MakeLagrange(order, pointMap(1, ip), iyy, izz, wvfn(:,:,:,ib), Pgrid)
+            P(iy,iz) = evalLagrange( order, distanceMap( 1, ip ), dx, Pgrid)
+          enddo
+        enddo
 
         do iz = 1, order
           call makeLagrange( order, P(:,iz), QGrid(:,iz) )
@@ -798,11 +796,12 @@ module prep_wvfn
 
         call makeLagrange( order, Q, RGrid )
         R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
-
         UofX2(ip, ib) = R
+
       enddo ! ip
     enddo ! ib
-     
+
+
     deallocate( P, Q, QGrid, RGrid )
     deallocate( pointMap, distanceMap )
 
@@ -889,33 +888,116 @@ module prep_wvfn
   end subroutine prep_wvfn_u1
 
   subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, num_coord, ierr)
-    ! TODO: replicate prep wvfn u2 up to test section
+    use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_SUM, MPI_IN_PLACE, myid
+    use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
+
+    complex(DP), intent( in ) :: UofX(:,:,:,:)
+    complex(DP), intent( out ) :: UofX2(:,:)
+    integer, intent( in ) :: odf_flag, num_coord
+    integer, intent(inout ) :: ierr
+
+    complex(DP), allocatable :: coeff( : )
+    complex(DP) :: A, u
+    integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, xdim, ydim, zdim, totdim, ix, iy, iz, ipts
+#ifdef MPI_F08
+    type( MPI_COMM ) :: pool_comm
+    type( MPI_REQUEST ) :: req(:,:)
+    type( MPI_DATATYPE ):: newType
+#else
+    integer :: pool_comm, newType
+    integer, allocatable :: req(:,:)
+#endif
+
+    nprocPool = odf_nprocPerPool()
+    allocate( req( 0:nprocPool-1, 2) )
+    mypool = odf_poolID()
+
+    pool_comm = odf_poolComm()
+
+    nX = size( UofX2, 1 )
+
+    xdim = size( UofX, 1 )
+    ydim = size( UofX, 2 )
+    zdim = size( UofX, 3 )
+    totdim = xdim * ydim * zdim
+
+    ! Loop through every pool and post receives
+    iband = 1
+    do iprocPool = 0, nprocPool - 1
+      nband = odf_getBandsForPoolID( iprocPool, odf_flag )
+      if( debug ) write(1000+myid,*) 'UofX2 recvs:', iprocPool, nx, nband, totdim
+      call MPI_IRECV( UofX2(:,iband:), nX*nband, MPI_DOUBLE_COMPLEX, iprocPool, 1, pool_comm, &
+                      req( iprocPool, 1 ), ierr )
+      if( ierr .ne. 0 ) return
+
+      iband = iband + nband
+    enddo
+
+    call MPI_BARRIER( pool_comm, ierr )
+    if( ierr .ne. 0 ) return
+
+    iz = 1
+    iy = 1
+    ix = 1
+    nband = odf_getBandsForPoolID( mypool, odf_flag )
+
+    do iprocPool = 0, nprocPool - 1
+      nX = prep_wvfn_divideXmesh( totdim, nprocPool, iprocPool )
+
+      call MPI_TYPE_VECTOR( nband, nX, totdim, MPI_DOUBLE_COMPLEX, newType, ierr )
+      if( ierr .ne. 0 ) return
+      call MPI_TYPE_COMMIT( newType, ierr )
+      if( ierr .ne. 0 ) return
+
+      if( debug ) then
+        write(1000+myid,*) 'UofX2 sends:', iprocPool, nx, nband
+        write(1000+myid,*) '            ', ix, iy, iz
+      endif
+      call MPI_ISEND( UofX( ix, iy, iz, 1 ), 1, newType, iprocPool, 1, pool_comm, req( iprocPool, 2 ), ierr )
+      if( ierr .ne. 0 ) return
+
+      call MPI_TYPE_FREE( newType, ierr )
+      if( ierr .ne. 0 ) return
+
+      ix = ix + nX
+      do while( ix .gt. xdim )
+        ix = ix - xdim
+        iy = iy + 1
+      enddo
+      do while( iy .gt. ydim )
+        iy = iy - ydim
+        iz = iz + 1
+      enddo
+    enddo
+
+    call MPI_WAITALL( nprocPool * 2, req, MPI_STATUSES_IGNORE, ierr )
+    if( ierr .ne. 0 ) return
+
+    deallocate( req )
+    nband = size( UofX2, 2 )
+    allocate( coeff( nband ) )
+
+    ! END IRREG REPLICATE
     ! don't need to downsize (UofX -> UofX2)
     ! modified gram schmidt + dot product with weight of volume element
     ! test: print out sum of wvfn^2 * integration weight
     !       confirm that they're similar to each other
     ! rescale (normalize): multiply by 1/sqrt(result)
-    integer, intent(inout) :: ierr
-    integer, intent(in) :: odf_flag
-    integer, intent(in) :: num_coord
-    complex(DP), intent(in) :: UofX(:,:,:,:)
-    complex(DP), intent(in) :: UofX2(:,:)
-    real(DP) :: A, B
-    integer :: iband, ipts
-    integer :: nbands
+
     A = 0
-    nbands = size(UofX, 4)
-    ! or size(wvfn, 4), try both
-    ! uvec = column vectors of UofX2
-    do iband = 1, nbands
-      uvec = UofX2(:,iband)
+    do iband = 1, nband
       ! this sum is the same as taking the dot product
       do ipts = 1, num_coord
-        A = A + UofX2(ipts, iband)
+        u = UofX2(ipts,iband)
+        A = A + conjg(u) * u ! todo: multiply by integration weight
       enddo
-      !A = dot_product(uvec, uvec)
-      print *, "A =", A
+      !A = 1 / sqrt(A)
+      print *, "A", A
+      UofX2(:,iband) = UofX2(:,iband) * A
+      A = 0
     enddo
+
+    ! todo: orthogonalize curr vec j to all vecs that came before (k)
   end subroutine irregular_prep_wvfn_u2
 
   subroutine prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
