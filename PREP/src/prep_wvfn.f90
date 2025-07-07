@@ -888,7 +888,7 @@ module prep_wvfn
   end subroutine prep_wvfn_u1
 
   subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, num_coord, ierr)
-    use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_SUM, MPI_IN_PLACE, myid
+    use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_DOUBLE_PRECISION, MPI_LOGICAL, MPI_SUM, MPI_IN_PLACE, myid, comm, root
     use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
 
     complex(DP), intent( in ) :: UofX(:,:,:,:)
@@ -897,8 +897,10 @@ module prep_wvfn
     integer, intent(inout ) :: ierr
 
     complex(DP), allocatable :: coeff( : )
+    real(DP), allocatable :: weights(:)
+    logical :: have_weights
     complex(DP) :: A, u
-    integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, xdim, ydim, zdim, totdim, ix, iy, iz, ipts
+    integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, xdim, ydim, zdim, totdim, i, ix, iy, iz, ipts
 #ifdef MPI_F08
     type( MPI_COMM ) :: pool_comm
     type( MPI_REQUEST ) :: req(:,:)
@@ -984,19 +986,49 @@ module prep_wvfn
     !       confirm that they're similar to each other
     ! rescale (normalize): multiply by 1/sqrt(result)
 
+    ! check for integration weight file
+    if (myid .eq. root ) then
+            inquire(file='integration_weight.txt', exist=have_weights)
+            if ( have_weights ) then
+                    open(unit=99, file='integration_weight.txt', form='formatted', status='old', action='read')
+                    allocate(weights(num_coord))
+                    do i = 1, num_coord
+                      read(99, *) weights(i)
+                    enddo
+                    close(99)
+            else
+                    do i = 1, num_coord
+                      weights(i) = 1
+                    enddo
+            endif
+            ! else, assume all weights are 1
+    endif
+
+#ifdef MPI
+    call MPI_BCAST(have_weights, 1, MPI_LOGICAL, 0, comm, ierr)
+    if (ierr /= 0) goto 111
+    if (have_weights) then
+            if (myid /= 0) then
+                    allocate(weights(num_coord) )
+            endif
+            call MPI_BCAST(weights, num_coord, MPI_DOUBLE_PRECISION, 0, comm, ierr)
+            if (ierr /= 0) goto 111
+    endif
+#endif
+
     A = 0
     do iband = 1, nband
       ! this sum is the same as taking the dot product
       do ipts = 1, num_coord
         u = UofX2(ipts,iband)
-        A = A + conjg(u) * u ! todo: multiply by integration weight
+        A = A + conjg(u) * u * weights(ipts) ! todo: multiply by integration weight
       enddo
       !A = 1 / sqrt(A)
       print *, "A", A
       UofX2(:,iband) = UofX2(:,iband) * A
       A = 0
     enddo
-
+111 continue
     ! todo: orthogonalize curr vec j to all vecs that came before (k)
   end subroutine irregular_prep_wvfn_u2
 
