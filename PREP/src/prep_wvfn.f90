@@ -784,7 +784,6 @@ module prep_wvfn
     dy = 1.0_dp / dims( 2 )
     dz = 1.0_dp / dims( 3 ) 
  
-    ! NEW LOOP
     ! don't need first iz/iy, move makelagrange PGrid here, allocate PGrid(order) <- 1D array
     do ib = 1, nbands
       do ip = 1, num_coord
@@ -809,7 +808,6 @@ module prep_wvfn
 
         call makeLagrange( order, Q, RGrid )
         R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
-        !print *, "R", R
         UofX(ip, ib) = R
 
       enddo ! ip
@@ -913,7 +911,7 @@ module prep_wvfn
     complex(DP), allocatable :: coeff( : )
     real(DP), allocatable :: weights(:)
     logical :: have_weights
-    complex(DP) :: A, u
+    complex(DP) :: A, u, norm
     integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, xdim, ydim, zdim, totdim, i, ix, iy, iz, ipts
 #ifdef MPI_F08
     type( MPI_COMM ) :: pool_comm
@@ -961,7 +959,7 @@ module prep_wvfn
     ! check for integration weight file
     if (myid .eq. root ) then
             inquire(file='integration_weight.txt', exist=have_weights)
-            if ( have_weights ) then
+            if (have_weights) then
                     open(unit=99, file='integration_weight.txt', form='formatted', status='old', action='read')
                     allocate(weights(num_coord))
                     do i = 1, num_coord
@@ -969,11 +967,11 @@ module prep_wvfn
                     enddo
                     close(99)
             else
+                    ! assume all weights = 1
                     do i = 1, num_coord
                       weights(i) = 1
                     enddo
             endif
-            ! else, assume all weights are 1
     endif
 
 #ifdef MPI
@@ -981,27 +979,36 @@ module prep_wvfn
     if (ierr /= 0) goto 111
     if (have_weights) then
             if (myid /= 0) then
-                    allocate(weights(num_coord) )
+                    allocate(weights(num_coord))
             endif
             call MPI_BCAST(weights, num_coord, MPI_DOUBLE_PRECISION, 0, comm, ierr)
             if (ierr /= 0) goto 111
     endif
 #endif
 
-    A = 0
+    A = (0.0_dp, 0.0_dp)
     do iband = 1, nband
-      ! take the dot product
-      do ipts = 1, num_coord
-        u = UofX2(ipts,iband)
-        A = A + conjg(u) * u * weights(ipts)
+      do jband = 1, iband - 1
+        do ipts = 1, num_coord
+          ! dot product
+          u = UofX2(ipts, iband)
+          A = A + conjg(u) * u * weights(ipts)
+        enddo
+        call MPI_ALLREDUCE(MPI_IN_PLACE, A, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
+        if (ierr /= 0) return
       enddo
-      A = 1 / sqrt(A)
-      print *, "A", A
-      UofX2(:,iband) = UofX2(:,iband) * A
-      A = 0
+      norm = (0.0_dp, 0.0_dp)
+      do ipts = 1, num_coord
+        u = UofX2(ipts, iband)
+        norm = norm + conjg(u) * u * weights(ipts)
+      enddo
+      call MPI_ALLREDUCE(MPI_IN_PLACE, norm, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
+      if (ierr /= 0) return
+      norm = 1.0_dp / sqrt(norm)
+      UofX2(:,iband) = UofX2(:,iband) * norm
     enddo
+
 111 continue
-    ! todo: orthogonalize curr vec j to all vecs that came before (k)
   end subroutine irregular_prep_wvfn_u2
 
   subroutine prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
