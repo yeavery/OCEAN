@@ -418,34 +418,30 @@ module prep_wvfn
 
     !uofX2 has size (nX, allBands)
     ! check FFT without resizing
-    call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
+    !call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
+    call prep_wvfn_checkFFT(nG, gvecPointer, .false., wantU2, fftGrid, ierr)
     nband_chunk = 1
+
+    ! todo: delete
+    write(6,*) 'size of fft grid =', fftGrid(1), fftGrid(2), fftGrid(3)
+    
     allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
-    ! todo: where tf did UofX allocation go
     allocate(UofX(num_coord, nbands))
 
     nchunk = ( nbands - 1 ) / nband_chunk + 1
     do ichunk = 1, nchunk
       nband_todo = min( nband_chunk, nbands - ( ichunk - 1 )*nband_chunk )
       ib = (ichunk-1)*nband_chunk+1
-      ! don't need to change this function
       call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
       ib2 = ib + nband_todo - 1
-      ! todo: interpolation onto UofX instead of UofX2
-      ! MPI logic will be simpler
-      ! increment ix by nX and delete rollover things
-      ! MPI WAITALL: write statements before and after this line
-      !         if it waits for > few sec, have to debug
       write(6,*) 'ipwu1', ikpt, ib
       call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), num_coord, curvi_coord, ierr, UofX(:, ib:ib2), nX )
       write(6,*) 'ipwu done'
       if ( ierr .ne. 0 ) return
     enddo
 
-    !deallocate( wvfn )
     WRITE(6,*) 'GS time', ikpt
-    ! TODO: modify u2 (gram-schmidt)
-    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, num_coord, ierr )
+    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, num_coord, ierr) 
     if ( ierr .ne. 0 ) return
     write(6,*) 'GS done'
     deallocate(wvfn, UofX)
@@ -735,6 +731,10 @@ module prep_wvfn
     integer :: dims(3), ib, ip, i, j, ix, iy, iz, iyy, izz, offset, iband
 
     integer :: order, nbands
+
+    ! for test
+    integer :: PointTest(3, num_coord)
+
     order = 4
     nbands = size(wvfn, 4)
 
@@ -745,7 +745,7 @@ module prep_wvfn
     dims(2) = size( wvfn, 2 )
     dims(3) = size( wvfn, 3 )
 
-    write(6,*) '!', shape( curvi_coord ), num_coord
+!    write(6,*) '!', shape( curvi_coord ), num_coord
     do ip = 1, num_coord
        
       do j = 1, 3
@@ -761,15 +761,22 @@ module prep_wvfn
         enddo
       enddo
 
+      ! if ip = 1-2, print distance, interpolated val (R), val of wvfn @ that point, index + val of pointMap
+
       ! for 4th order want index=2 to be just below
       pointMap(:, ip) = 1 + floor(rvec(:) * real(dims(:), DP))
-
+      pointTest(:,ip) = 1 + NINT( rvec(:) * real(dims(:), DP) )
       do j = 1, 3
         if (pointMap(j, ip) .lt. 1) pointMap(j, ip) = pointMap(j, ip) + dims(j)
         if (pointMap(j, ip) .gt. dims(j)) pointMap(j, ip) = pointMap(j, ip) - dims(j)
       enddo
 
-      distanceMap(:, ip) = ( rvec( : ) * real( dims(:), DP ) - floor( rvec( : ) * real( dims(:), DP ) ) ) / real(dims( : ), DP ) 
+      distanceMap(:, ip) = ( rvec( : ) * real( dims(:), DP ) - floor( rvec( : ) * real( dims(:), DP ) ) ) / real(dims( : ), DP )
+
+      if (ip == 1 .or. ip == 2) then
+             write(6,*), 'rvec=', rvec(:), 'dims(:)', real(dims(:), DP)
+             write(6,*) 'dist=', distanceMap(:,ip), 'point val=', pointMap(:,ip)
+      endif
 
     enddo
 
@@ -809,6 +816,17 @@ module prep_wvfn
         call makeLagrange( order, Q, RGrid )
         R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
         UofX(ip, ib) = R
+
+        !if (ip == 1) write(6,*) "wvfn", wvfn(1,1,1,ib)
+        !if (ip == 2) write(6,*) "[666]", wvfn(6,6,6,ib), "[511]", wvfn(5,1,1,ib)
+        !if (ip == 2) write(6,*) "[611]", wvfn(6,1,1,ib), "[711]", wvfn(7,1,1,ib) 
+        !if (ip == 1 .or. ip == 2) write(6,*) "R =", R
+
+        if( ABS( R - wvfn(pointTest(1,ip),pointTest(2,ip),pointTest(3,ip),ib))/ABS(R + &
+        wvfn(pointTest(1,ip),pointTest(2,ip),pointTest(3,ip),ib)) .gt. 0.0000001 ) then
+                write(6,*) "!! point test", pointTest(:,ip), R, wvfn(pointTest(1,ip), pointTest(2,ip), pointTest(3,ip), ib)
+                write(6,*) "ib=", ib, "ip=", ip
+        endif
 
       enddo ! ip
     enddo ! ib
@@ -911,8 +929,8 @@ module prep_wvfn
     complex(DP), allocatable :: coeff( : )
     real(DP), allocatable :: weights(:)
     logical :: have_weights
-    complex(DP) :: A, u, norm
-    integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, xdim, ydim, zdim, totdim, i, ix, iy, iz, ipts
+    complex(DP) :: A, u, v, norm
+    integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, i, ipts
 #ifdef MPI_F08
     type( MPI_COMM ) :: pool_comm
     type( MPI_REQUEST ) :: req(:,:)
@@ -930,13 +948,11 @@ module prep_wvfn
 
     nX = size( UofX2, 1 )
 
-    totdim = size( UofX, 1 )
-
     ! Loop through every pool and post receives
     iband = 1
     do iprocPool = 0, nprocPool - 1
       nband = odf_getBandsForPoolID( iprocPool, odf_flag )
-      if( debug ) write(1000+myid,*) 'UofX2 recvs:', iprocPool, nx, nband, totdim
+      if( debug ) write(1000+myid,*) 'UofX2 recvs:', iprocPool, nx, nband, nX
       call MPI_IRECV( UofX2(:,iband:), nX*nband, MPI_DOUBLE_COMPLEX, iprocPool, 1, pool_comm, &
                       req( iprocPool, 1 ), ierr )
       call MPI_ISEND(UofX(:, iband), nX*nband, MPI_DOUBLE_COMPLEX, iprocPool, 1, pool_comm, &
@@ -988,7 +1004,6 @@ module prep_wvfn
 
     A = (0.0_dp, 0.0_dp)
     do iband = 1, nband
-      do jband = 1, iband - 1
         do ipts = 1, num_coord
           ! dot product
           u = UofX2(ipts, iband)
@@ -996,16 +1011,31 @@ module prep_wvfn
         enddo
         call MPI_ALLREDUCE(MPI_IN_PLACE, A, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
         if (ierr /= 0) return
+
+        ! rescale uofx2
+        A = 1/sqrt(A)
+        UofX2(:,iband) = UofX2(:,iband)*A
+
+        do jband = 1, iband-1
+              norm = (0.0_dp, 0.0_dp)
+              do ipts = 1, num_coord
+                u = UofX2(ipts, iband)
+                v = UofX2(ipts, jband)
+                norm = norm + conjg(v) * u * weights(ipts)
+              enddo
+              call MPI_ALLREDUCE(MPI_IN_PLACE, norm, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
+              if (ierr /= 0) return
+              UofX2(:,iband) = UofX2(:,iband) - UofX2(:,jband) * norm
       enddo
-      norm = (0.0_dp, 0.0_dp)
+      A = 0
       do ipts = 1, num_coord
-        u = UofX2(ipts, iband)
-        norm = norm + conjg(u) * u * weights(ipts)
+        u = UofX2(ipts,iband)
+        A = A + conjg(u) * u * weights(ipts)
       enddo
-      call MPI_ALLREDUCE(MPI_IN_PLACE, norm, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE, A, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
       if (ierr /= 0) return
-      norm = 1.0_dp / sqrt(norm)
-      UofX2(:,iband) = UofX2(:,iband) * norm
+      A = 1/sqrt(A)
+      UofX2(:,iband) = UofX2(:,iband)*A
     enddo
 
 111 continue
