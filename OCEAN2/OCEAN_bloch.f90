@@ -52,6 +52,9 @@ module OCEAN_bloch
   end function OCEAN_bloch_is_loaded
 
   subroutine OCEAN_bloch_lrLOAD( sys, tau, xshift, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, ierr )
+    ! places core hole in grid
+    ! does not shift xmesh if using a curvilinear grid
+
     use OCEAN_mpi
     use OCEAN_system
     implicit none
@@ -84,25 +87,27 @@ module OCEAN_bloch
     !
     !  We test each dimension individually of course. 
     !
+    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
     xshift(:) = 0
-    if( mod( sys%kmesh(1), 2 ) .eq. 0 ) then
-      xshift( 1 ) = floor( real(sys%xmesh(1), DP ) * tau(1) )
-    else
-      xshift( 1 ) = floor( real(sys%xmesh(1), DP ) * (tau(1)-0.5d0 ) )
+    if (.not. have_curvi) then
+            ! calculate xshift
+            if( mod( sys%kmesh(1), 2 ) .eq. 0 ) then
+                    xshift( 1 ) = floor( real(sys%xmesh(1), DP ) * tau(1) )
+            else
+                    xshift( 1 ) = floor( real(sys%xmesh(1), DP ) * (tau(1)-0.5d0 ) )
+            endif
+            if( mod( sys%kmesh(2), 2 ) .eq. 0 ) then
+                    xshift( 2 ) = floor( real(sys%xmesh(2), DP ) * tau(2) )
+            else
+                    xshift( 2 ) = floor( real(sys%xmesh(2), DP ) * (tau(2)-0.5d0 ) )
+            endif
+            if( mod( sys%kmesh(3), 2 ) .eq. 0 ) then
+                    xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * tau(3) )
+            else
+                    xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * (tau(3)-0.5d0 ) )
+            endif
+            xshift(:) = xshift(:) * xshift_override(:)
     endif
-    if( mod( sys%kmesh(2), 2 ) .eq. 0 ) then
-      xshift( 2 ) = floor( real(sys%xmesh(2), DP ) * tau(2) )
-    else
-      xshift( 2 ) = floor( real(sys%xmesh(2), DP ) * (tau(2)-0.5d0 ) )
-    endif
-    if( mod( sys%kmesh(3), 2 ) .eq. 0 ) then
-      xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * tau(3) )
-    else
-      xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * (tau(3)-0.5d0 ) )
-    endif
-    ! 
-    xshift(:) = xshift(:) * xshift_override(:)
-    !
     if( myid .eq. root ) write(6,*) 'Shifting X-grid by ', xshift(:)
     if( myid .eq. root ) write(6,*) 'Original tau ', tau(:)
     tau( 1 ) = tau(1) - real(xshift(1), DP )/real(sys%xmesh(1), kind( 1.0d0 ))
@@ -110,7 +115,6 @@ module OCEAN_bloch
     tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
-    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
     if (have_curvi) then
             call irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )
             if (ierr /= 0) goto 111
@@ -242,7 +246,6 @@ end subroutine regular_lrLOAD
       integer :: xiter, ibd, ispn
 
       ! new tau = tau, xshift = what you're shifting every coordinate by
-       
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
         xiter = 0

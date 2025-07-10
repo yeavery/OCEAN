@@ -1877,6 +1877,9 @@ module ocean_long_range
   end subroutine regular_grid
 
   subroutine irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr, num_coord, curvi_coord )
+    ! shifts grid so that it centers around the core hole
+    ! not many curvilinear changes except indexing
+
     use OCEAN_mpi!, only : myid, root, my_tau, my_xshift, my_start_nx, my_xpts, W
     use OCEAN_system 
     implicit none
@@ -1968,7 +1971,7 @@ module ocean_long_range
  end subroutine irregular_grid
 
 #if 0
-  subroutine lr_populate_bloch( sys, ierr )
+  subroutine lr_populate_bloch( sys, ierr, have_curvi )
     use OCEAN_mpi!, only : myid, nproc, comm, root
 !    use mpi
     use OCEAN_system
@@ -1993,6 +1996,10 @@ module ocean_long_range
     logical :: metal, normal
     integer :: nx_left, nx_start, nx_tmp, xiter, ii
 
+    ! curvilinear
+    logical :: have_curvi
+    integer :: num_coord
+    real(DP), allocatable :: curvi_coord
      
     nx = sys%xmesh(1)
     ny = sys%xmesh(2)
@@ -2055,21 +2062,21 @@ module ocean_long_range
       !
       xshift(:) = 0
       if( mod( sys%kmesh(1), 2 ) .eq. 0 ) then
-        xshift( 1 ) = floor( real(nx, DP ) * tau(1) )
+              xshift( 1 ) = floor( real(nx, DP ) * tau(1) )
       else
-        xshift( 1 ) = floor( real(nx, DP ) * (tau(1)-0.5d0 ) )
+              xshift( 1 ) = floor( real(nx, DP ) * (tau(1)-0.5d0 ) )
       endif
       if( mod( sys%kmesh(2), 2 ) .eq. 0 ) then
-        xshift( 2 ) = floor( real(ny, DP ) * tau(2) )
+              xshift( 2 ) = floor( real(ny, DP ) * tau(2) )
       else
-        xshift( 2 ) = floor( real(ny, DP ) * (tau(2)-0.5d0 ) )
+              xshift( 2 ) = floor( real(ny, DP ) * (tau(2)-0.5d0 ) )
       endif
       if( mod( sys%kmesh(3), 2 ) .eq. 0 ) then
-        xshift( 3 ) = floor( real(nz, DP ) * tau(3) )
+              xshift( 3 ) = floor( real(nz, DP ) * tau(3) )
       else
-        xshift( 3 ) = floor( real(nz, DP ) * (tau(3)-0.5d0 ) )
-      endif
-      ! 
+              xshift( 3 ) = floor( real(nz, DP ) * (tau(3)-0.5d0 ) )
+      endif 
+      
       write(6,*) 'Shifting X-grid by ', xshift(:)
       write(6,*) 'Original tau ', tau(:)
       tau( 1 ) = tau(1) - real(xshift(1), DP )/real(nx, DP )

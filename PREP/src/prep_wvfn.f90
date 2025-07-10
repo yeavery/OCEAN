@@ -418,8 +418,8 @@ module prep_wvfn
 
     !uofX2 has size (nX, allBands)
     ! check FFT without resizing
-    !call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
-    call prep_wvfn_checkFFT(nG, gvecPointer, .false., wantU2, fftGrid, ierr)
+    call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
+    !call prep_wvfn_checkFFT(nG, gvecPointer, .false., wantU2, fftGrid, ierr)
     nband_chunk = 1
 
     ! todo: delete
@@ -710,6 +710,8 @@ module prep_wvfn
   end subroutine prep_wvfn_closeU2
 
   subroutine irregular_prep_wvfn_u1( wvfn, num_coord, curvi_coord, ierr, UofX, nX )
+    ! interpolate onto irregular grid using lagrange interpolation
+
     use ocean_constants, only : pi_dp
     use ocean_mpi, only : myid
     use ocean_interpolate
@@ -730,6 +732,8 @@ module prep_wvfn
     real(DP) :: dx, dy, dz, rvec(3)
     integer :: dims(3), ib, ip, i, j, ix, iy, iz, iyy, izz, offset, iband
 
+    real(DP) :: A
+
     integer :: order, nbands
 
     ! for test
@@ -744,6 +748,12 @@ module prep_wvfn
     dims(1) = size( wvfn, 1 )
     dims(2) = size( wvfn, 2 )
     dims(3) = size( wvfn, 3 )
+
+    ! todo: calculate A for wvfn
+    do ib = 1, nbands
+      A = sum(conjg(wvfn(:,:,:,ib)) * wvfn(:,:,:,ib))
+    enddo
+   write(555,*) A 
 
 !    write(6,*) '!', shape( curvi_coord ), num_coord
     do ip = 1, num_coord
@@ -765,18 +775,13 @@ module prep_wvfn
 
       ! for 4th order want index=2 to be just below
       pointMap(:, ip) = 1 + floor(rvec(:) * real(dims(:), DP))
-      pointTest(:,ip) = 1 + NINT( rvec(:) * real(dims(:), DP) )
+      !pointTest(:,ip) = 1 + NINT( rvec(:) * real(dims(:), DP) )
       do j = 1, 3
         if (pointMap(j, ip) .lt. 1) pointMap(j, ip) = pointMap(j, ip) + dims(j)
         if (pointMap(j, ip) .gt. dims(j)) pointMap(j, ip) = pointMap(j, ip) - dims(j)
       enddo
 
       distanceMap(:, ip) = ( rvec( : ) * real( dims(:), DP ) - floor( rvec( : ) * real( dims(:), DP ) ) ) / real(dims( : ), DP )
-
-      if (ip == 1 .or. ip == 2) then
-             write(6,*), 'rvec=', rvec(:), 'dims(:)', real(dims(:), DP)
-             write(6,*) 'dist=', distanceMap(:,ip), 'point val=', pointMap(:,ip)
-      endif
 
     enddo
 
@@ -817,16 +822,11 @@ module prep_wvfn
         R = evalLagrange( order, distanceMap( 3, ip ), dz, Rgrid )
         UofX(ip, ib) = R
 
-        !if (ip == 1) write(6,*) "wvfn", wvfn(1,1,1,ib)
-        !if (ip == 2) write(6,*) "[666]", wvfn(6,6,6,ib), "[511]", wvfn(5,1,1,ib)
-        !if (ip == 2) write(6,*) "[611]", wvfn(6,1,1,ib), "[711]", wvfn(7,1,1,ib) 
-        !if (ip == 1 .or. ip == 2) write(6,*) "R =", R
-
-        if( ABS( R - wvfn(pointTest(1,ip),pointTest(2,ip),pointTest(3,ip),ib))/ABS(R + &
-        wvfn(pointTest(1,ip),pointTest(2,ip),pointTest(3,ip),ib)) .gt. 0.0000001 ) then
-                write(6,*) "!! point test", pointTest(:,ip), R, wvfn(pointTest(1,ip), pointTest(2,ip), pointTest(3,ip), ib)
-                write(6,*) "ib=", ib, "ip=", ip
-        endif
+        !if( ABS( R - wvfn(pointTest(1,ip),pointTest(2,ip),pointTest(3,ip),ib))/ABS(R + &
+        !wvfn(pointTest(1,ip),pointTest(2,ip),pointTest(3,ip),ib)) .gt. 0.0000001 ) then
+                !write(6,*) "!! point test", pointTest(:,ip), R, wvfn(pointTest(1,ip), pointTest(2,ip), pointTest(3,ip), ib)
+                !write(6,*) "ib=", ib, "ip=", ip
+        !endif
 
       enddo ! ip
     enddo ! ib
@@ -918,6 +918,8 @@ module prep_wvfn
   end subroutine prep_wvfn_u1
 
   subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, num_coord, ierr)
+    ! computes the dot product scaled by integration weight and performs modified gram-schmidt
+
     use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_DOUBLE_PRECISION, MPI_LOGICAL, MPI_SUM, MPI_IN_PLACE, myid, comm, root
     use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
 
@@ -929,7 +931,8 @@ module prep_wvfn
     complex(DP), allocatable :: coeff( : )
     real(DP), allocatable :: weights(:)
     logical :: have_weights
-    complex(DP) :: A, u, v, norm
+    complex(DP) :: u, v, norm
+    real(DP) :: A
     integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, i, ipts
 #ifdef MPI_F08
     type( MPI_COMM ) :: pool_comm
@@ -1013,6 +1016,8 @@ module prep_wvfn
         if (ierr /= 0) return
 
         ! rescale uofx2
+        ! todo: check norm
+        write(333, *) A
         A = 1/sqrt(A)
         UofX2(:,iband) = UofX2(:,iband)*A
 
@@ -1359,6 +1364,8 @@ module prep_wvfn
   end function prep_wvfn_divideXmesh
 
   subroutine irregular_prep_wvfn_checkFFT( nG, gvecs, wantCKS, wantU2, fftGrid, ierr)
+    ! calculates grid boundaries without downsampling
+
     use ocean_mpi, only : myid
     use prep_system, only : system_parameters, params
     integer, intent( in ) :: nG, gvecs(3,nG)
@@ -1405,21 +1412,6 @@ module prep_wvfn
     if( wantCKS ) fftGrid(:) = fftGrid(:) * 2
     write(1000+myid,'(A,3(1X,I8))') 'FFT grid', fftGrid(:)
 
-!    if( wantU2 ) then
-!      do i = 1, 3
-!        do j = 0, params%xmesh( i )
-!          if( mod( fftGrid( i ), params%xmesh( i ) ) .eq. 0 ) then
-!            exit
-!          else
-!            fftGrid( i ) = fftGrid( i ) + 1
-!          endif
-!        enddo
-!        if( mod( fftGrid( i ), params%xmesh( i ) ) .ne. 0 ) then
-!          ierr = i
-!          return
-!        endif
-!      enddo
-!    else
       tx = 1
       do i = 1, 3
         if( wantU2 ) tx = params%xmesh( i )
@@ -1452,15 +1444,6 @@ module prep_wvfn
             test = test / 7
             if( debug ) write(1000+myid,*) '   ', 7
           enddo
-! by default FFTW3 is best on 7-smooth numbers 
-!          if( mod( test, 11 ) .eq. 0 ) then
-!            test = test / 11
-!            if( debug ) write(1000+myid,*) '   ', 11
-!          endif
-!          if( mod( test, 13 ) .eq. 0 ) then
-!            test = test / 13
-!            if( debug ) write(1000+myid,*) '   ', 13
-!          endif
 #endif
           if( test .eq. 1 ) then
             fftGrid(i) = fftGrid(i) + k
