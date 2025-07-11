@@ -245,6 +245,42 @@ end subroutine regular_lrLOAD
       integer :: i, j
       integer :: xiter, ibd, ispn
 
+      logical :: have_weights
+      real(DP), allocatable :: weights(:)
+
+      ! check for integration weights
+      if (myid .eq. root ) then
+            inquire(file='integration_weight.txt', exist=have_weights)
+            if (have_weights) then
+                    open(unit=99, file='integration_weight.txt', form='formatted', status='old', action='read')
+                    allocate(weights(num_coord))
+                    do i = 1, num_coord
+                      read(99, *) weights(i)
+                    enddo
+                    close(99)
+            else
+                    ! assume all weights = 1
+                    do i = 1, num_coord
+                      weights(i) = 1
+                    enddo
+            endif
+      endif
+
+#ifdef MPI
+      call MPI_BCAST(have_weights, 1, MPI_LOGICAL, 0, comm, ierr)
+      if (ierr /= 0) goto 111
+      if (have_weights) then
+              if (myid /= 0) then
+                      allocate(weights(num_coord))
+              endif
+              call MPI_BCAST(weights, num_coord, MPI_DOUBLE_PRECISION, 0, comm, ierr)
+              if (ierr /= 0) goto 111
+      endif
+#endif
+
+      ! todo: bloch function multiply by sqrt(weights(i))
+      !       but iq doesn't = num coord? How to index through
+
       ! new tau = tau, xshift = what you're shifting every coordinate by
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
@@ -278,8 +314,8 @@ end subroutine regular_lrLOAD
 
                 ! calculate phase shift: 2pi * (kvec dot coordinate)
                 phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(:, i)) 
-                cphs = dcos(phs_tot)
-                sphs = dsin(phs_tot)
+                cphs = dcos(phs_tot) * sqrt(weights(i))
+                sphs = dsin(phs_tot) * sqrt(weights(i))
                 if (use_sp) then
                         do ibd = 1, my_num_bands
                           rbs_sp_out( ibd, iq, i - my_start_nx + 1, ispn )  = &
@@ -305,7 +341,7 @@ end subroutine regular_lrLOAD
         ! for num_coord loop
         enddo
       enddo
-       
+  111 continue 
   end subroutine irregular_lrLOAD
 
   subroutine OCEAN_bloch_lrINIT( xpts, kpts, num_bands, start_nx, ierr )

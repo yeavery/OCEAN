@@ -21,7 +21,7 @@ module ocean_long_range
   real( DP ), pointer :: W( :, : )
   real( SP ), pointer :: re_bloch_state_sp( :, :, :, : )
   real( SP ), pointer :: im_bloch_state_sp( :, :, :, : )
-  real( SP ), pointer :: W_sp( :, : )
+  
 
   real( DP ) :: my_tau( 3 )
   integer :: my_xshift( 3 )
@@ -35,7 +35,7 @@ module ocean_long_range
 
   logical :: use_obf = .true.
   logical :: use_fake_obf = .false.
-  real( DP ) :: timer = 0.0_DP
+ 
   real( DP ) :: timer1 = 0.0_DP
 
   logical :: first_time = .true.
@@ -1666,9 +1666,8 @@ module ocean_long_range
     type( O_system ), intent( in ) :: sys
     integer, intent( inout ) :: ierr
     
-    
+    real( DP ) :: fr( 3 ), xk( 3 ), r, frac, potn, pbc_prefac(3), dir(3)
     real( DP ) :: epsi, avec( 3, 3 ), amet( 3, 3 ), bvec(3,3), bmet(3,3)
-    real( DP ) :: fr( 3 ), xk( 3 ), alf( 3 ), r, frac, potn, pbc_prefac(3), dir(3)
     real( DP ), allocatable :: ptab( : ), rtab( : )
     integer :: ix, iy, iz, k1, k2, k3, kk1, kk2, kk3, xiter, kiter, i, ii, j, nptab
     integer :: xtarg, ytarg, ztarg, pbc( 3 )
@@ -1892,7 +1891,7 @@ module ocean_long_range
     logical, intent( in ) :: isolated
     integer, intent( inout ) :: ierr
     real( DP ) :: fr( 3 ), xk( 3 ), alf( 3 ), r, potn, pbc_prefac(3), dir(3)
-    integer :: i, k1, k2, k3, kk1, kk2, kk3, xiter, kiter, xtarg, ytarg, ztarg
+    integer :: i, k1, k2, k3, kk1, kk2, kk3, xiter, kiter
 
     real(DP), intent( in ) :: curvi_coord(:, :)
     integer :: num_coord
@@ -2306,7 +2305,7 @@ module ocean_long_range
     integer, intent( in ) :: iband, ikpt, ialpha
 
 
-    integer :: jband, jkpt, jalpha, val_spin( sys%nalpha ), icms, icml, ivms
+    integer :: jkpt, jalpha, val_spin( sys%nalpha ), icms, icml, ivms
     integer :: ixpt, jfft
     real(dp), allocatable :: xwrkr(:), xwrki(:), wrk(:), rtphi(:,:), itphi(:,:)
     
