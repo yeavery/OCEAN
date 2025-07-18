@@ -11,6 +11,7 @@ module ocean_long_range
 
   use AI_kinds
   use FFT_wrapper, only : fft_obj
+  use irreg_grid_check, only : irreg_grid, grid
 
   implicit none
   save
@@ -1659,7 +1660,6 @@ module ocean_long_range
   subroutine lr_populate_W2( sys, ierr )
     use OCEAN_mpi!, only : myid, comm, root
     use OCEAN_system
-    use irreg_grid_check
 !    use mpi
     implicit none
 
@@ -1671,10 +1671,7 @@ module ocean_long_range
     real( DP ), allocatable :: ptab( : ), rtab( : )
     integer :: ix, iy, iz, k1, k2, k3, kk1, kk2, kk3, xiter, kiter, i, ii, j, nptab
     integer :: xtarg, ytarg, ztarg, pbc( 3 )
-    logical :: have_pbc, have_curvi
-
-    real(DP), allocatable :: curvi_coord(:, :)
-    integer :: num_coord
+    logical :: have_pbc
  
     character(len=24) :: rpotName
     character(len=1) :: dumc
@@ -1743,11 +1740,9 @@ module ocean_long_range
 #endif
 
     ! Irregular grid
-    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
-    if (have_curvi) then
-            call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr, num_coord, curvi_coord )
+    if (grid%have_curvi) then
+            call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
             if (ierr /= 0) goto 111
-            deallocate(curvi_coord)
     else
             call regular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr)
             if (ierr /= 0) goto 111
@@ -1875,7 +1870,7 @@ module ocean_long_range
     enddo
   end subroutine regular_grid
 
-  subroutine irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr, num_coord, curvi_coord )
+  subroutine irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
     ! shifts grid so that it centers around the core hole
     ! not many curvilinear changes except indexing
 
@@ -1893,20 +1888,17 @@ module ocean_long_range
     real( DP ) :: fr( 3 ), xk( 3 ), alf( 3 ), r, potn, pbc_prefac(3), dir(3)
     integer :: i, k1, k2, k3, kk1, kk2, kk3, xiter, kiter
 
-    real(DP), intent( in ) :: curvi_coord(:, :)
-    integer :: num_coord
-
-    if(num_coord .ne. product(sys%xmesh(:))) then
+    if(grid%num_coord .ne. product(sys%xmesh(:))) then
             print *, "xmesh does not match irregular grid dims"
             ierr = 3
             return
     endif
     if( myid .eq. root ) write(6,*) 'Tau: ', my_tau(:), my_xshift(:)
     xiter = 0
-    do i = 1, num_coord
-    fr( 1 ) = curvi_coord(1, i)
-    fr( 2 ) = curvi_coord(2, i)
-    fr( 3 ) = curvi_coord(3, i)
+    do i = 1, grid%num_coord
+    fr( 1 ) = grid%shifted_curvi(1, i)
+    fr( 2 ) = grid%shifted_curvi(2, i)
+    fr( 3 ) = grid%shifted_curvi(3, i)
     xiter = xiter + 1
     if( ( xiter .ge. my_start_nx ) .and. ( xiter .lt. my_start_nx + my_xpts ) ) then
             kiter = 0
@@ -1970,7 +1962,7 @@ module ocean_long_range
  end subroutine irregular_grid
 
 #if 0
-  subroutine lr_populate_bloch( sys, ierr, have_curvi )
+  subroutine lr_populate_bloch( sys, ierr )
     use OCEAN_mpi!, only : myid, nproc, comm, root
 !    use mpi
     use OCEAN_system
@@ -1994,11 +1986,6 @@ module ocean_long_range
 !    complex( DP ), allocatable, dimension( :, : ) :: tmp_bloch
     logical :: metal, normal
     integer :: nx_left, nx_start, nx_tmp, xiter, ii
-
-    ! curvilinear
-    logical :: have_curvi
-    integer :: num_coord
-    real(DP), allocatable :: curvi_coord
      
     nx = sys%xmesh(1)
     ny = sys%xmesh(2)

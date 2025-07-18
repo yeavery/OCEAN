@@ -58,6 +58,8 @@ OCEAN.o: OCEAN.f90 AI_kinds.o OCEAN_driver.o OCEAN_system.o OCEAN_timekeeper.o O
 
 AI_kinds.o: AI_kinds.f90
 	$(MPIFORT) $(FLAGS) -c -o AI_kinds.o AI_kinds.f90
+irreg_grid_check.o: ai_kinds.mod ocean_mpi.mod
+irreg_grid_check.o: ai_kinds.mod ocean_mpi.mod
 
 OCEAN_timekeeper.o: OCEAN_timekeeper.f90
 	$(MPIFORT) $(FLAGS) -c -o OCEAN_timekeeper.o OCEAN_timekeeper.f90

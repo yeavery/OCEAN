@@ -7,7 +7,7 @@
 !
 module OCEAN_bloch
   use AI_kinds
-  use irreg_grid_check
+  use irreg_grid_check, only : irreg_grid, grid, do_shift
 
   save
   private
@@ -70,10 +70,7 @@ module OCEAN_bloch
     integer, intent( out ) :: xshift( 3 )
     logical, intent( in ) :: use_sp
 
-    real(DP), allocatable :: curvi_coord(:, :)
-    integer :: i, num_coord
-    logical :: have_curvi
-
+    real(DP) :: curvi_xshift(3)
     ! Change phase as if things were flipped around. Don't actually re-distribute
     !
     ! Reasoning for the below;
@@ -87,9 +84,8 @@ module OCEAN_bloch
     !
     !  We test each dimension individually of course. 
     !
-    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
     xshift(:) = 0
-    if (.not. have_curvi) then
+    if (.not. grid%have_curvi) then
             ! calculate xshift
             if( mod( sys%kmesh(1), 2 ) .eq. 0 ) then
                     xshift( 1 ) = floor( real(sys%xmesh(1), DP ) * tau(1) )
@@ -107,18 +103,38 @@ module OCEAN_bloch
                     xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * (tau(3)-0.5d0 ) )
             endif
             xshift(:) = xshift(:) * xshift_override(:)
+    else
+            curvi_xshift(:) = tau(:)
+            if(mod(sys%kmesh(1), 2) .eq. 1) then
+                    curvi_xshift(1) = tau(1)-0.5d0
+            endif
+            if(mod(sys%kmesh(2), 2) .eq. 1) then
+                    curvi_xshift(2) = tau(2)-0.5d0
+            endif
+            if(mod(sys%kmesh(3), 2) .eq. 1) then
+                    curvi_xshift(3) = tau(3)-0.5d0
+            endif
     endif
+
     if( myid .eq. root ) write(6,*) 'Shifting X-grid by ', xshift(:)
     if( myid .eq. root ) write(6,*) 'Original tau ', tau(:)
-    tau( 1 ) = tau(1) - real(xshift(1), DP )/real(sys%xmesh(1), kind( 1.0d0 ))
-    tau( 2 ) = tau(2) - real(xshift(2), DP )/real(sys%xmesh(2), kind( 1.0d0 ))
-    tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
+
+    if (.not. grid%have_curvi) then
+            tau( 1 ) = tau(1) - real(xshift(1), DP )/real(sys%xmesh(1), kind( 1.0d0 ))
+            tau( 2 ) = tau(2) - real(xshift(2), DP )/real(sys%xmesh(2), kind( 1.0d0 ))
+            tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
+    else
+            ! shift tau to 0 or 1/2
+            tau(:) = tau(:) - curvi_xshift(:)
+    endif
+
+    
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
-    if (have_curvi) then
-            call irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )
+    if (grid%have_curvi) then
+            call irregular_lrLOAD( sys, ierr, curvi_xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
             if (ierr /= 0) goto 111
-            deallocate(curvi_coord)
+            !deallocate(curvi_coord)
     else
             call regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
             if ( ierr /= 0 ) goto 111
@@ -222,22 +238,20 @@ module OCEAN_bloch
   enddo
 end subroutine regular_lrLOAD
 
-  subroutine irregular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, num_coord, curvi_coord )          
+  subroutine irregular_lrLOAD( sys, ierr, curvi_xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )          
       use OCEAN_mpi
       use OCEAN_system
       implicit none
       type(o_system), intent(in) :: sys
       integer, intent(inout) :: ierr
       real(DP), intent(in) :: tau(3)
-      integer, intent(in) :: xshift( 3 )
+      real(DP), intent(in) :: curvi_xshift( 3 )
       logical, intent(in) :: use_sp
       real(DP), intent(inout) :: rbs_out(:,:,:,:)
       real(DP), intent(inout) :: ibs_out(:,:,:,:)
       real(SP), intent(inout) :: rbs_sp_out(:,:,:,:)
       real(SP), intent(inout) :: ibs_sp_out(:,:,:,:)
 
-      real(DP), intent(inout) :: curvi_coord(:, :)
-      integer :: num_coord
       real(DP) :: qvec(3)
 
       real(DP) :: cphs, sphs, pi, phs_tot
@@ -245,58 +259,12 @@ end subroutine regular_lrLOAD
       integer :: i, j
       integer :: xiter, ibd, ispn
 
-      logical :: have_weights
-      real(DP), allocatable :: weights(:)
-
-      ! check for integration weights
-      if (myid .eq. root ) then
-            inquire(file='integration_weight.txt', exist=have_weights)
-            if (have_weights) then
-                    open(unit=99, file='integration_weight.txt', form='formatted', status='old', action='read')
-                    allocate(weights(num_coord))
-                    do i = 1, num_coord
-                      read(99, *) weights(i)
-                    enddo
-                    close(99)
-            else
-                    ! assume all weights = 1
-                    do i = 1, num_coord
-                      weights(i) = 1
-                    enddo
-            endif
-      endif
-
-#ifdef MPI
-      call MPI_BCAST(have_weights, 1, MPI_LOGICAL, 0, comm, ierr)
-      if (ierr /= 0) goto 111
-      if (have_weights) then
-              if (myid /= 0) then
-                      allocate(weights(num_coord))
-              endif
-              call MPI_BCAST(weights, num_coord, MPI_DOUBLE_PRECISION, 0, comm, ierr)
-              if (ierr /= 0) goto 111
-      endif
-#endif
-
-      ! todo: bloch function multiply by sqrt(weights(i))
-      !       but iq doesn't = num coord? How to index through
-
       ! new tau = tau, xshift = what you're shifting every coordinate by
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
         xiter = 0
-        do i = 1, num_coord
-          do j = 1, 3
-            ! shift the coordinate
-            curvi_coord(j, i) = curvi_coord(j, i) - xshift(j)
-            ! move it back into the unit cell
-            if (curvi_coord(j, i) < 0) then 
-                    curvi_coord(j, i) = curvi_coord(j, i) + 1
-            elseif (curvi_coord(j, i) > 1) then
-                    curvi_coord(j, i) = curvi_coord(j, i) - 1
-            endif
-          enddo
-          
+        do i = 1, grid%num_coord
+          call do_shift(i, curvi_xshift)
           ! ADDED XITER
           xiter = xiter + 1
           if( xiter .lt. my_start_nx ) cycle
@@ -313,9 +281,9 @@ end subroutine regular_lrLOAD
                 qvec(3) = real(iq3 - 1, DP) / real(sys%kmesh(3), DP)
 
                 ! calculate phase shift: 2pi * (kvec dot coordinate)
-                phs_tot = 2.0d0 * pi * dot_product(qvec, curvi_coord(:, i)) 
-                cphs = dcos(phs_tot) * sqrt(weights(i))
-                sphs = dsin(phs_tot) * sqrt(weights(i))
+                phs_tot = 2.0d0 * pi * dot_product(qvec, grid%shifted_curvi(:, i)) 
+                cphs = dcos(phs_tot) * sqrt(grid%weights(i))
+                sphs = dsin(phs_tot) * sqrt(grid%weights(i))
                 if (use_sp) then
                         do ibd = 1, my_num_bands
                           rbs_sp_out( ibd, iq, i - my_start_nx + 1, ispn )  = &

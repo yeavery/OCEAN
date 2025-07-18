@@ -4,11 +4,11 @@ module irreg_grid_check
   ! variable and constant declarations
   type irreg_grid
           integer num_coord
-          real(DP), allocatable :: curvi_coord(:,:), weights(:)
+          real(DP), allocatable :: curvi_coord(:,:), shifted_curvi(:,:), weights(:)
           logical :: have_curvi, have_weights
   end type
 
-  type(irreg_grid) :: curvi_coord
+  type(irreg_grid), public, protected :: grid
 
 contains 
   subroutine check_for_grid( ierr ) 
@@ -24,9 +24,10 @@ contains
                     read(99, *) grid%num_coord
                     allocate( grid%curvi_coord(3, grid%num_coord) )
                     do i = 1, grid%num_coord
-                    read(99, *) grid%curvi_coord(1, i), grid%curvi_coord(2, i), grid%curvi_coord(3, i)
+                      read(99, *) grid%curvi_coord(1, i), grid%curvi_coord(2, i), grid%curvi_coord(3, i)
                     enddo
                     close(99)
+                    grid%shifted_curvi = grid%curvi_coord
             endif
             
             inquire(file='integration_weight.txt', exist=grid%have_weights)
@@ -71,5 +72,40 @@ contains
 #endif
 111 continue
   end subroutine check_for_grid
+
+  subroutine do_shift(i, xshift)
+    integer, intent(in) :: i
+    real(DP), intent(in) :: xshift(3)
+    integer :: j
+
+    do j = 1, 3
+      ! shift the coordinate
+      grid%shifted_curvi(j, i) = grid%curvi_coord(j, i) - xshift(j)
+      ! move it back into the unit cell
+      if (grid%curvi_coord(j, i) < 0) then 
+              grid%shifted_curvi(j, i) = grid%curvi_coord(j, i) + 1
+      elseif (grid%curvi_coord(j, i) > 1) then
+              grid%shifted_curvi(j, i) = grid%curvi_coord(j, i) - 1
+      endif
+    enddo
+
+  end subroutine do_shift
+
+  subroutine irreg_grid_final(this)
+    type(irreg_grid), intent(inout) :: this
+    if (allocated(this%curvi_coord)) then
+      deallocate(this%curvi_coord)
+    endif
+    if (allocated(this%shifted_curvi)) then
+      deallocate(this%shifted_curvi)
+    endif
+    if (allocated(this%weights)) then
+      deallocate(this%weights)
+    endif
+  end subroutine irreg_grid_final
+
+  subroutine finalize_grid()
+    call irreg_grid_final(grid)
+  end subroutine finalize_grid
 
 end module irreg_grid_check

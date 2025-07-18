@@ -10,7 +10,7 @@
 !
 module prep_wvfn
   use AI_kinds, only : DP
-  use irreg_grid_check, only : check_for_grid
+  use irreg_grid_check, only : irreg_grid, grid
 
   implicit none
   private
@@ -18,12 +18,9 @@ module prep_wvfn
   logical, parameter :: perKptU2 = .true.
 
   public :: prep_wvfn_driver
-
-
   logical, parameter :: debug = .false.
 
   contains
-
 
   subroutine prep_wvfn_driver( ierr )
     use OCEAN_mpi
@@ -60,10 +57,6 @@ module prep_wvfn
     integer :: conFH, valFH, fileHandle, poolID, i, iband, bandChunk, omp_threads, kStride
     logical :: is_kpt, wantCKS, wantU2, addShift, wantLegacy, wantTmels
 
-    ! custom grid params
-    real(DP), allocatable :: curvi_coord(:, :)
-    integer :: num_coord, j
-    logical :: have_curvi
 !$  integer, external :: omp_get_max_threads
     wantCKS = calcParams%makeCKS
     wantU2 = calcParams%makeU2
@@ -105,10 +98,11 @@ module prep_wvfn
     ! probably subroutines/functions in this module
     ! grabbing pool_size and pool_id from ODF
     
-    call check_for_grid(ierr, have_curvi, num_coord, curvi_coord)
+    !call check_for_grid
+    if (ierr .ne. 0) return
 
-    if (have_curvi) then
-            nX = prep_wvfn_divideXmesh(num_coord, nprocPool, poolID)
+    if (grid%have_curvi) then
+            nX = prep_wvfn_divideXmesh(grid%num_coord, nprocPool, poolID)
     else
             nX = prep_wvfn_divideXmesh( product( params%xmesh ), nprocPool, poolID )
     endif
@@ -256,9 +250,9 @@ module prep_wvfn
         if (wantU2) then
                 if (ikpt .ne. 0) then
                         allocate(UofX(params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands), UofX2(nX, allBands))
-                        if (have_curvi) then
+                        if (grid%have_curvi) then
                                 call irregular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
-                                        allBands, nX, fileHandle, odf_flag, UofX2, num_coord, curvi_coord, ierr)
+                                        allBands, nX, fileHandle, odf_flag, UofX2, ierr)
                                 if (ierr /= 0) goto 111
                         else
                                 call regular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
@@ -345,7 +339,7 @@ module prep_wvfn
     enddo ! iuni ( combined spin and kpt )
 
     ! deallocate curvi coord after iuni loop
-    if (have_curvi) deallocate(curvi_coord)
+    !if (grid%have_curvi) deallocate(grid%curvi_coord)
 
 
     call prep_wvfn_closeU2( valFH, ierr, vtype )
@@ -401,15 +395,13 @@ module prep_wvfn
   end subroutine prep_wvfn_driver
 
   subroutine irregular_prep_wvfn_driver( ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, allBands, nX, fileHandle, &
-                  odf_flag, UofX2, num_coord, curvi_coord, ierr )
+                  odf_flag, UofX2, ierr )
     use prep_system, only : system_parameters, params, prep_system_ikpt2kvec, calculation_parameters, prep_system_umklapp
     integer, intent(in) :: ikpt, ispin, nG, nbands, allBands, nX, fileHandle, odf_flag
     complex(DP), intent(out) :: UofX2(:,:)
     integer, pointer :: gvecPointer(:,:)
     complex(DP), pointer :: UofGPointer(:,:)
     integer, intent(inout) :: ierr
-    integer, intent(in) :: num_coord
-    real(DP), intent(inout) :: curvi_coord(:, :)
     complex(DP), allocatable :: wvfn(:,:,:,:)
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
     logical :: wantU2 = .true.
@@ -426,7 +418,7 @@ module prep_wvfn
     write(6,*) 'size of fft grid =', fftGrid(1), fftGrid(2), fftGrid(3)
     
     allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
-    allocate(UofX(num_coord, nbands))
+    allocate(UofX(grid%num_coord, nbands))
 
     nchunk = ( nbands - 1 ) / nband_chunk + 1
     do ichunk = 1, nchunk
@@ -435,13 +427,13 @@ module prep_wvfn
       call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,ib:), wvfn(:,:,:,1:nband_todo) )
       ib2 = ib + nband_todo - 1
       write(6,*) 'ipwu1', ikpt, ib
-      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), num_coord, curvi_coord, ierr, UofX(:, ib:ib2), nX )
+      call irregular_prep_wvfn_u1( wvfn(:,:,:,1:nband_todo), ierr, UofX(:, ib:ib2), nX )
       write(6,*) 'ipwu done'
       if ( ierr .ne. 0 ) return
     enddo
 
     WRITE(6,*) 'GS time', ikpt
-    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, num_coord, ierr) 
+    call irregular_prep_wvfn_u2( UofX, UofX2, odf_flag, ierr) 
     if ( ierr .ne. 0 ) return
     write(6,*) 'GS done'
     deallocate(wvfn, UofX)
@@ -709,7 +701,7 @@ module prep_wvfn
 #endif
   end subroutine prep_wvfn_closeU2
 
-  subroutine irregular_prep_wvfn_u1( wvfn, num_coord, curvi_coord, ierr, UofX, nX )
+  subroutine irregular_prep_wvfn_u1( wvfn, ierr, UofX, nX )
     ! interpolate onto irregular grid using lagrange interpolation
 
     use ocean_constants, only : pi_dp
@@ -718,8 +710,6 @@ module prep_wvfn
     ! don't need avecs, qcart, Pgrid, isInitGrid
     ! base off of swl_ComplexDoLagrange (line 2468 of SCREEN/src/screen_wvfn_converter.f90)
     complex(DP), intent(inout) :: wvfn(:,:,:,:)
-    integer, intent(in) :: num_coord
-    real(DP), intent(in) :: curvi_coord(:,:)
     integer, intent(inout) :: ierr
     complex(DP), intent(out) :: UofX(:,:)
     integer, intent(in) :: nX
@@ -736,13 +726,10 @@ module prep_wvfn
 
     integer :: order, nbands
 
-    ! for test
-    integer :: PointTest(3, num_coord)
-
     order = 4
     nbands = size(wvfn, 4)
 
-    allocate( pointMap( 3, num_coord ), distanceMap( 3, num_coord ), stat=ierr )
+    allocate( pointMap( 3, grid%num_coord ), distanceMap( 3, grid%num_coord ), stat=ierr )
     if( ierr .ne. 0 ) return
       
     dims(1) = size( wvfn, 1 )
@@ -756,10 +743,10 @@ module prep_wvfn
    write(555,*) A 
 
 !    write(6,*) '!', shape( curvi_coord ), num_coord
-    do ip = 1, num_coord
+    do ip = 1, grid%num_coord
        
       do j = 1, 3
-        rvec(j) = curvi_coord(j, ip)
+        rvec(j) = grid%curvi_coord(j, ip)
       enddo
 
       do i = 1, 3
@@ -798,7 +785,7 @@ module prep_wvfn
  
     ! don't need first iz/iy, move makelagrange PGrid here, allocate PGrid(order) <- 1D array
     do ib = 1, nbands
-      do ip = 1, num_coord
+      do ip = 1, grid%num_coord
         do iz = 1, order
           izz = pointMap( 3, ip ) + iz - 1 - offset
           if( izz .gt. dims( 3 ) ) izz = izz - dims( 3 )
@@ -917,7 +904,7 @@ module prep_wvfn
 
   end subroutine prep_wvfn_u1
 
-  subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, num_coord, ierr)
+  subroutine irregular_prep_wvfn_u2(UofX, UofX2, odf_flag, ierr)
     ! computes the dot product scaled by integration weight and performs modified gram-schmidt
 
     use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_DOUBLE_PRECISION, MPI_LOGICAL, MPI_SUM, MPI_IN_PLACE, myid, comm, root
@@ -925,12 +912,10 @@ module prep_wvfn
 
     complex(DP), intent( in ) :: UofX(:,:)
     complex(DP), intent( out ) :: UofX2(:,:)
-    integer, intent( in ) :: odf_flag, num_coord
+    integer, intent( in ) :: odf_flag
     integer, intent(inout ) :: ierr
 
     complex(DP), allocatable :: coeff( : )
-    real(DP), allocatable :: weights(:)
-    logical :: have_weights
     complex(DP) :: u, v, norm
     real(DP) :: A
     integer :: iprocPool, nprocPool, mypool, iband, jband, nband, nX, i, ipts
@@ -975,42 +960,12 @@ module prep_wvfn
     ! modified gram schmidt + dot product with weight of volume element
     ! rescale (normalize): multiply by 1/sqrt(result)
 
-    ! check for integration weight file
-    if (myid .eq. root ) then
-            inquire(file='integration_weight.txt', exist=have_weights)
-            if (have_weights) then
-                    open(unit=99, file='integration_weight.txt', form='formatted', status='old', action='read')
-                    allocate(weights(num_coord))
-                    do i = 1, num_coord
-                      read(99, *) weights(i)
-                    enddo
-                    close(99)
-            else
-                    ! assume all weights = 1
-                    do i = 1, num_coord
-                      weights(i) = 1
-                    enddo
-            endif
-    endif
-
-#ifdef MPI
-    call MPI_BCAST(have_weights, 1, MPI_LOGICAL, 0, comm, ierr)
-    if (ierr /= 0) goto 111
-    if (have_weights) then
-            if (myid /= 0) then
-                    allocate(weights(num_coord))
-            endif
-            call MPI_BCAST(weights, num_coord, MPI_DOUBLE_PRECISION, 0, comm, ierr)
-            if (ierr /= 0) goto 111
-    endif
-#endif
-
     A = (0.0_dp, 0.0_dp)
     do iband = 1, nband
-        do ipts = 1, num_coord
+        do ipts = 1, grid%num_coord
           ! dot product
           u = UofX2(ipts, iband)
-          A = A + conjg(u) * u * weights(ipts)
+          A = A + conjg(u) * u * grid%weights(ipts)
         enddo
         call MPI_ALLREDUCE(MPI_IN_PLACE, A, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
         if (ierr /= 0) return
@@ -1023,19 +978,19 @@ module prep_wvfn
 
         do jband = 1, iband-1
               norm = (0.0_dp, 0.0_dp)
-              do ipts = 1, num_coord
+              do ipts = 1, grid%num_coord
                 u = UofX2(ipts, iband)
                 v = UofX2(ipts, jband)
-                norm = norm + conjg(v) * u * weights(ipts)
+                norm = norm + conjg(v) * u * grid%weights(ipts)
               enddo
               call MPI_ALLREDUCE(MPI_IN_PLACE, norm, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
               if (ierr /= 0) return
               UofX2(:,iband) = UofX2(:,iband) - UofX2(:,jband) * norm
       enddo
       A = 0
-      do ipts = 1, num_coord
+      do ipts = 1, grid%num_coord
         u = UofX2(ipts,iband)
-        A = A + conjg(u) * u * weights(ipts)
+        A = A + conjg(u) * u * grid%weights(ipts)
       enddo
       call MPI_ALLREDUCE(MPI_IN_PLACE, A, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, pool_comm, ierr)
       if (ierr /= 0) return

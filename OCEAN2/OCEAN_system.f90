@@ -148,6 +148,7 @@ module OCEAN_system
 
   subroutine OCEAN_sys_init( sys, ierr )
     use OCEAN_mpi!, ONLY : myid, comm, root, nproc
+    use irreg_grid_check, only : irreg_grid, grid, check_for_grid
     implicit none
      
 
@@ -610,6 +611,8 @@ module OCEAN_system
 !    sys%cur_run%tau(:) = 0.0_DP
     call OCEAN_runlist_init( sys, nruns, ierr )
     sys%nruns = nruns
+
+    call check_for_grid(ierr)
 
   end subroutine OCEAN_sys_init
 
