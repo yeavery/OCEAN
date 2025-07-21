@@ -1,6 +1,7 @@
 module irreg_grid_check
   use AI_kinds
   use OCEAN_mpi
+  save
   ! variable and constant declarations
   type irreg_grid
           integer num_coord
@@ -23,6 +24,7 @@ contains
                     ! read number of coordinates from first line
                     read(99, *) grid%num_coord
                     allocate( grid%curvi_coord(3, grid%num_coord) )
+                    allocate( grid%shifted_curvi(3, grid%num_coord) )
                     do i = 1, grid%num_coord
                       read(99, *) grid%curvi_coord(1, i), grid%curvi_coord(2, i), grid%curvi_coord(3, i)
                     enddo
@@ -55,8 +57,11 @@ contains
             ! if not root, allocate array of size curvi_coord
             if (myid /= 0) then
                     allocate( grid%curvi_coord(3, grid%num_coord) )
+                    allocate( grid%shifted_curvi(3, grid%num_coord))
             endif
             call MPI_BCAST(grid%curvi_coord, grid%num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
+            if (ierr /= 0) goto 111
+            call MPI_BCAST(grid%shifted_curvi, grid%num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
             if (ierr /= 0) goto 111
     endif
     
@@ -77,6 +82,9 @@ contains
     integer, intent(in) :: i
     real(DP), intent(in) :: xshift(3)
     integer :: j
+
+    print *, "shifted curvi size =", size(grid%shifted_curvi), "og =", size(grid%curvi_coord)
+    print *, "i =", i
 
     do j = 1, 3
       ! shift the coordinate

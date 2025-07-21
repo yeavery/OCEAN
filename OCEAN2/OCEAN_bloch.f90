@@ -114,6 +114,8 @@ module OCEAN_bloch
             if(mod(sys%kmesh(3), 2) .eq. 1) then
                     curvi_xshift(3) = tau(3)-0.5d0
             endif
+            ! TEST
+            curvi_xshift(:) = 0
     endif
 
     if( myid .eq. root ) write(6,*) 'Shifting X-grid by ', xshift(:)
@@ -123,9 +125,9 @@ module OCEAN_bloch
             tau( 1 ) = tau(1) - real(xshift(1), DP )/real(sys%xmesh(1), kind( 1.0d0 ))
             tau( 2 ) = tau(2) - real(xshift(2), DP )/real(sys%xmesh(2), kind( 1.0d0 ))
             tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
-    else
+    !else
             ! shift tau to 0 or 1/2
-            tau(:) = tau(:) - curvi_xshift(:)
+            !tau(:) = tau(:) - curvi_xshift(:)
     endif
 
     
