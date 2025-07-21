@@ -338,10 +338,6 @@ module prep_wvfn
 
     enddo ! iuni ( combined spin and kpt )
 
-    ! deallocate curvi coord after iuni loop
-    !if (grid%have_curvi) deallocate(grid%curvi_coord)
-
-
     call prep_wvfn_closeU2( valFH, ierr, vtype )
     call prep_wvfn_closeU2( conFH, ierr, ctype )
 
