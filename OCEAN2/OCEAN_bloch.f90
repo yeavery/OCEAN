@@ -85,7 +85,7 @@ module OCEAN_bloch
     !  We test each dimension individually of course. 
     !
     xshift(:) = 0
-    if (.not. grid%have_curvi) then
+    if (.not. grid%have_curvi) then 
             ! calculate xshift
             if( mod( sys%kmesh(1), 2 ) .eq. 0 ) then
                     xshift( 1 ) = floor( real(sys%xmesh(1), DP ) * tau(1) )
@@ -103,7 +103,7 @@ module OCEAN_bloch
                     xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * (tau(3)-0.5d0 ) )
             endif
             xshift(:) = xshift(:) * xshift_override(:)
-    else
+    else 
             curvi_xshift(:) = tau(:)
             if(mod(sys%kmesh(1), 2) .eq. 1) then
                     curvi_xshift(1) = tau(1)-0.5d0
@@ -144,7 +144,6 @@ module OCEAN_bloch
   end subroutine OCEAN_bloch_lrLOAD
 
   subroutine regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
-
   use OCEAN_mpi
   use OCEAN_system
   implicit none
@@ -161,7 +160,7 @@ module OCEAN_bloch
   integer :: iq, iq1, iq2, iq3
   integer :: ix, iy, iz, xtarg, ytarg, ztarg, xph, yph, zph
   integer :: xiter, ibd, ispn
-  pi = 4.0d0 * atan( 1.0d0 )
+  pi = 4.0d0 * atan( 1.0d0 ) 
 
   do ispn = 1, sys%nspn
     xiter = 0
@@ -258,7 +257,7 @@ end subroutine regular_lrLOAD
       real(DP) :: cphs, sphs, pi, phs_tot
       integer :: iq, iq1, iq2, iq3
       integer :: i, j
-      integer :: xiter, ibd, ispn
+      integer :: xiter, ibd, ispn 
 
       ! new tau = tau, xshift = what you're shifting every coordinate by
       pi = 4.0d0 * atan( 1.0d0 )

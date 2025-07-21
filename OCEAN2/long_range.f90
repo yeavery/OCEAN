@@ -1740,7 +1740,7 @@ module ocean_long_range
 #endif
 
     ! Irregular grid
-    if (grid%have_curvi) then
+    if (grid%have_curvi) then 
             call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
             if (ierr /= 0) goto 111
     else

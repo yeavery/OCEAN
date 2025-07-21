@@ -25,6 +25,7 @@ contains
                     read(99, *) grid%num_coord
                     allocate( grid%curvi_coord(3, grid%num_coord) )
                     allocate( grid%shifted_curvi(3, grid%num_coord) )
+                    allocate( grid%weights(grid%num_coord) )
                     do i = 1, grid%num_coord
                       read(99, *) grid%curvi_coord(1, i), grid%curvi_coord(2, i), grid%curvi_coord(3, i)
                     enddo
@@ -33,9 +34,8 @@ contains
             endif
             
             inquire(file='integration_weight.txt', exist=grid%have_weights)
-            if (grid%have_weights) then
+            if (grid%have_curvi .and. grid%have_weights) then
                     open(unit=99, file='integration_weight.txt', form='formatted', status='old', action='read')
-                    allocate(grid%weights(grid%num_coord))
                     do j = 1, grid%num_coord
                       read(99, *) grid%weights(j)
                     enddo
@@ -57,7 +57,8 @@ contains
             ! if not root, allocate array of size curvi_coord
             if (myid /= 0) then
                     allocate( grid%curvi_coord(3, grid%num_coord) )
-                    allocate( grid%shifted_curvi(3, grid%num_coord))
+                    allocate( grid%shifted_curvi(3, grid%num_coord) )
+                    allocate( grid%weights(grid%num_coord) )
             endif
             call MPI_BCAST(grid%curvi_coord, grid%num_coord*3, MPI_DOUBLE_PRECISION, 0, comm, ierr)
             if (ierr /= 0) goto 111
@@ -67,10 +68,7 @@ contains
     
     call MPI_BCAST(grid%have_weights, 1, MPI_LOGICAL, 0, comm, ierr)
     if (ierr /= 0) goto 111
-    if (grid%have_weights) then
-            if (myid /= 0) then
-                    allocate(grid%weights(grid%num_coord))
-            endif
+    if (grid%have_curvi .and. grid%have_weights) then
             call MPI_BCAST(grid%weights, grid%num_coord, MPI_DOUBLE_PRECISION, 0, comm, ierr)
             if (ierr /= 0) goto 111
     endif
@@ -82,9 +80,6 @@ contains
     integer, intent(in) :: i
     real(DP), intent(in) :: xshift(3)
     integer :: j
-
-    print *, "shifted curvi size =", size(grid%shifted_curvi), "og =", size(grid%curvi_coord)
-    print *, "i =", i
 
     do j = 1, 3
       ! shift the coordinate

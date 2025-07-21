@@ -10,7 +10,7 @@
 !
 module prep_wvfn
   use AI_kinds, only : DP
-  use irreg_grid_check, only : irreg_grid, grid
+  use irreg_grid_check, only : irreg_grid, grid, check_for_grid
 
   implicit none
   private
@@ -98,7 +98,7 @@ module prep_wvfn
     ! probably subroutines/functions in this module
     ! grabbing pool_size and pool_id from ODF
     
-    !call check_for_grid
+    call check_for_grid(ierr)
     if (ierr .ne. 0) return
 
     if (grid%have_curvi) then
@@ -410,8 +410,7 @@ module prep_wvfn
     !call prep_wvfn_checkFFT(nG, gvecPointer, .false., wantU2, fftGrid, ierr)
     nband_chunk = 1
 
-    ! todo: delete
-    write(6,*) 'size of fft grid =', fftGrid(1), fftGrid(2), fftGrid(3)
+    
     
     allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
     allocate(UofX(grid%num_coord, nbands))
@@ -447,6 +446,8 @@ module prep_wvfn
     complex(DP), allocatable :: wvfn(:,:,:,:)
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
     logical :: wantU2 = .true.
+
+    
     
     call prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
     nband_chunk = 1
@@ -510,7 +511,7 @@ module prep_wvfn
           do ib = 1, nbc
             if( conEnergies( ib, ik, ispin ) .ge. efermi ) then
               if( eshift .gt. conEnergies( ib, ik, ispin ) ) then
-                eshift = conEnergies( ib, ik, ispin )
+                eshift = conEnergies( ib, ik, ispin ) 
               endif  
               exit
             endif
@@ -722,6 +723,8 @@ module prep_wvfn
 
     integer :: order, nbands
 
+    
+
     order = 4
     nbands = size(wvfn, 4)
 
@@ -831,6 +834,8 @@ module prep_wvfn
     real(DP) :: res
     real(DP), external :: dznrm2
 
+    
+
     xIn = size( wvfn, 1 ) 
     yIn = size( wvfn, 2 ) 
     zIn = size( wvfn, 3 ) 
@@ -932,6 +937,8 @@ module prep_wvfn
 
     nX = size( UofX2, 1 )
 
+    
+
     ! Loop through every pool and post receives
     iband = 1
     do iprocPool = 0, nprocPool - 1
@@ -998,7 +1005,6 @@ module prep_wvfn
   end subroutine irregular_prep_wvfn_u2
 
   subroutine prep_wvfn_u2( UofX, UofX2, odf_flag, ierr )
-    ! START IRREG REPLICATE
     use ocean_mpi, only : MPI_DOUBLE_COMPLEX, MPI_STATUSES_IGNORE, MPI_SUM, MPI_IN_PLACE, myid
     use ocean_dft_files, only : odf_poolComm, odf_nprocPerPool, odf_getBandsForPoolID, odf_poolID
 
@@ -1017,6 +1023,7 @@ module prep_wvfn
     integer :: pool_comm, newType
     integer, allocatable :: req(:,:)
 #endif
+    
 
     nprocPool = odf_nprocPerPool()
     allocate( req( 0:nprocPool-1, 2) )
@@ -1327,6 +1334,8 @@ module prep_wvfn
     integer :: boundaries( 3, 2 )
     integer :: i, j, k, test, tx
 
+    
+
     boundaries(:,1) = minval( gvecs, 2 )
     boundaries(:,2) = maxval( gvecs, 2 )
     do i = 1, 3
@@ -1350,6 +1359,8 @@ module prep_wvfn
     !
     integer :: boundaries( 3, 2 )
     integer :: i, j, k, test, tx
+
+    
 
     boundaries(:,1) = minval( gvecs, 2 )
     boundaries(:,2) = maxval( gvecs, 2 )
