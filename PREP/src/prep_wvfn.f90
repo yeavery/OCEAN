@@ -130,8 +130,8 @@ module prep_wvfn
     totConBAnds = params%brange(4) - params%brange(3) + 1
 
     if( wantTmels ) then
-            write(myid+1000,*) totValBands, totConBands, conBands, myConBandStart, nuni, ikpt, kStride
-            call ocean_tmels_open( totValBands, totConBands, conBands, myConBandStart, nuni, ikpt, kStride, ierr )
+      write(myid+1000,*) totValBands, totConBands, conBands, myConBandStart, nuni, ikpt, kStride
+      call ocean_tmels_open( totValBands, totConBands, conBands, myConBandStart, nuni, ikpt, kStride, ierr )
     endif
 
     do iuni = 1, nuni
@@ -140,87 +140,87 @@ module prep_wvfn
       write(1000+myid,*) iuni, ikpt, ispin
 
       if( ikpt .gt. 0 ) then
-              if( myid .eq. root ) write(6,*) ikpt, ispin
-              ! This is just a precaution while implementing
-              call odf_is_my_kpt( ikpt, ispin, is_kpt, ierr )
+        if( myid .eq. root ) write(6,*) ikpt, ispin
+        ! This is just a precaution while implementing
+        call odf_is_my_kpt( ikpt, ispin, is_kpt, ierr )
 
-              if( ierr .ne. 0 ) return
-              if( is_kpt .eqv. .false. ) then
-                      ierr = 101
-                      return
-              endif
-              ! end precaution
-              ! first call gets us either valence or both
-              call odf_get_ngvecs_at_kpt( ikpt, ispin, ngvecs, ierr )
-              if( ierr .ne. 0 ) then
-                      write(1000+myid,*) 'Failed to get ngvecs', ierr
-                      return
-              else
-                      write(1000+myid,*) 'Fetched ngvecs: ', ngvecs(:)
-              endif
+        if( ierr .ne. 0 ) return
+        if( is_kpt .eqv. .false. ) then
+          ierr = 101
+          return
+        endif
+        ! end precaution
+        ! first call gets us either valence or both
+        call odf_get_ngvecs_at_kpt( ikpt, ispin, ngvecs, ierr )
+        if( ierr .ne. 0 ) then
+          write(1000+myid,*) 'Failed to get ngvecs', ierr
+          return
+        else
+          write(1000+myid,*) 'Fetched ngvecs: ', ngvecs(:)
+        endif
 
-              ! separate logic for shifted and for split
+        ! separate logic for shifted and for split
 
-          allocate( valGvecs( 3, ngvecs(1) ), conGvecs( 3, ngvecs(2) ), &
-                    valUofG( ngvecs(1), valBands ), conUofG( ngvecs(2), conBands ) )
-            ! read in file, which means distribute bands across procs
-            ! need to ensure bounds are appropriately enforced
-            ! this means for shifted calcs keep only occ/unocc
-            call odf_read_at_kpt_split( ikpt, ispin, ngvecs(1), ngvecs(2), valBands, conBands, &
+        allocate( valGvecs( 3, ngvecs(1) ), conGvecs( 3, ngvecs(2) ), &
+                  valUofG( ngvecs(1), valBands ), conUofG( ngvecs(2), conBands ) )
+        ! read in file, which means distribute bands across procs
+        ! need to ensure bounds are appropriately enforced
+        ! this means for shifted calcs keep only occ/unocc
+        call odf_read_at_kpt_split( ikpt, ispin, ngvecs(1), ngvecs(2), valBands, conBands, &
                     valGvecs, conGvecs, valUofG, conUofG, ierr )
-            if( ierr .ne. 0 ) then
-                    write(1000+myid,*) 'Failed to read k-point', ierr
-                    return
-            endif
+        if( ierr .ne. 0 ) then
+          write(1000+myid,*) 'Failed to read k-point', ierr
+          return
+        endif
 
-            ! Check for Umklapp -- if the actual k-point was outside [0,1] (or maybe [-1,1])
-            ! the calculated k-point was *not* made at the requested k-point, but was shifted
-            ! to be inside the BZ
-            call prep_system_umklapp( ikpt, .false., umklapp )
-            if( umklapp(1) .ne. 0 .or. umklapp(2) .ne. 0 .or. umklapp(3) .ne. 0 ) then
-                    do i = 1, ngvecs(1)
-                    valGvecs(:,i) = valGvecs(:,i) - umklapp(:)
-                    enddo
-            endif
-            call prep_system_umklapp( ikpt, .true., umklapp )
-            if( umklapp(1) .ne. 0 .or. umklapp(2) .ne. 0 .or. umklapp(3) .ne. 0 ) then
-                    do i = 1, ngvecs(2)
-                      conGvecs(:,i) = conGvecs(:,i) - umklapp(:)
-                    enddo
-            endif
+        ! Check for Umklapp -- if the actual k-point was outside [0,1] (or maybe [-1,1])
+        ! the calculated k-point was *not* made at the requested k-point, but was shifted
+        ! to be inside the BZ
+        call prep_system_umklapp( ikpt, .false., umklapp )
+        if( umklapp(1) .ne. 0 .or. umklapp(2) .ne. 0 .or. umklapp(3) .ne. 0 ) then
+          do i = 1, ngvecs(1)
+            valGvecs(:,i) = valGvecs(:,i) - umklapp(:)
+          enddo
+        endif
+        call prep_system_umklapp( ikpt, .true., umklapp )
+        if( umklapp(1) .ne. 0 .or. umklapp(2) .ne. 0 .or. umklapp(3) .ne. 0 ) then
+          do i = 1, ngvecs(2)
+            conGvecs(:,i) = conGvecs(:,i) - umklapp(:)
+          enddo
+        endif
 
-            ! If doing TMELS for valence, start by figuring that out
-            ! A) possibly at the same time as read in redistribute slices of G-points?
-            ! but then also need to ensure uniformity of G
-            ! B) Everybody gets the occupied states, possibly band by band, and then calculates
-            ! the tmels for only their subset of unoccupied states  <----
+        ! If doing TMELS for valence, start by figuring that out
+        ! A) possibly at the same time as read in redistribute slices of G-points?
+        ! but then also need to ensure uniformity of G
+        ! B) Everybody gets the occupied states, possibly band by band, and then calculates
+        ! the tmels for only their subset of unoccupied states  <----
 
-            if( wantTmels ) then
-                    totValBands = params%brange(2) - params%brange(1) + 1
-                    ! If we have more than one proc per k-point, share the valence bands
-                    if( odf_nprocPerPool() .gt. 1 ) then
-                            myValBandStart = 1
-                            allocate( spareValUofG( ngvecs(1), totValBands ) )
-                            call shareValence( valUofG, spareValUofG, ierr )
-                            if( ierr .ne. 0 ) return
-                            call ocean_tmels_calc( ikpt, ispin, totValBands, conBands, valGvecs, conGvecs, &
+        if( wantTmels ) then
+          totValBands = params%brange(2) - params%brange(1) + 1
+          ! If we have more than one proc per k-point, share the valence bands
+          if( odf_nprocPerPool() .gt. 1 ) then
+            myValBandStart = 1
+            allocate( spareValUofG( ngvecs(1), totValBands ) )
+            call shareValence( valUofG, spareValUofG, ierr )
+            if( ierr .ne. 0 ) return
+            call ocean_tmels_calc( ikpt, ispin, totValBands, conBands, valGvecs, conGvecs, &
                                    spareValUofG, conUofG, params%nkpts, totValBands, totConBands, &
                                    myValBandStart, myConBandStart, ierr )
-                            deallocate( spareValUofG )
-                    else
-                            call ocean_tmels_calc( ikpt, ispin, totValBands, conBands, valGvecs, conGvecs, &
+            deallocate( spareValUofG )
+        else
+            call ocean_tmels_calc( ikpt, ispin, totValBands, conBands, valGvecs, conGvecs, &
                                    ValUofG, conUofG, params%nkpts, totValBands, totConBands, &
                                    myValBandStart, myConBandStart, ierr )
-                    endif
-            endif
+        endif
+      endif
     else  ! ikpt == 0, the process isn't doing anything
-            ! This makes sure we don't assign pointers to un-allocated arrays
-            allocate( valGvecs( 0, 0 ), conGvecs( 0, 0 ), valUofG( 0, 0 ), conUofG( 0, 0 ) )
-            if( wantTmels ) then
-                    call ocean_tmels_calc( ikpt, ispin, totValBands, conBands, valGvecs, conGvecs, &
-                                 spareValUofG, conUofG, params%nkpts, totValBands, totConBands, &
-                                 myValBandStart, myConBandStart, ierr )
-            endif
+      ! This makes sure we don't assign pointers to un-allocated arrays
+      allocate( valGvecs( 0, 0 ), conGvecs( 0, 0 ), valUofG( 0, 0 ), conUofG( 0, 0 ) )
+      if( wantTmels ) then
+        call ocean_tmels_calc( ikpt, ispin, totValBands, conBands, valGvecs, conGvecs, &
+                               spareValUofG, conUofG, params%nkpts, totValBands, totConBands, &
+                               myValBandStart, myConBandStart, ierr )
+      endif
     endif
 
     ! Loop over conversion
@@ -252,78 +252,78 @@ module prep_wvfn
 #endif
 
         if (wantU2) then
-                if (ikpt .ne. 0) then
-                        allocate(UofX(params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands), UofX2(nX, allBands))
-                        if (grid%have_curvi) then
-                                call irregular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
+          if (ikpt .ne. 0) then
+            allocate(UofX(params%xmesh(1), params%xmesh(2), params%xmesh(3), nbands), UofX2(nX, allBands))
+            if (grid%have_curvi) then
+              call irregular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
                                         allBands, nX, fileHandle, odf_flag, UofX2, ierr)
-                                if (ierr /= 0) goto 111
-                        else
-                                call regular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
+              if (ierr /= 0) goto 111
+            else
+              call regular_prep_wvfn_driver(ikpt, ispin, nG, gvecPointer, UofGPointer, nbands, &
                                         allBands, nX, fileHandle, odf_flag, UofX, UofX2, ierr)
-                                if (ierr /= 0) goto 111
-                        endif
-                else
-                        allocate( UofX( 0, 0, 0, 0 ), UofX2( 0, 0 ) )
-                endif
+              if (ierr /= 0) goto 111
+            endif
+          else
+            allocate( UofX( 0, 0, 0, 0 ), UofX2( 0, 0 ) )
+          endif
 
-                if (perKptU2) then
-                        call prep_wvfn_writeU2_perKpt( ikpt, ispin, UofX2, fileHandle, ierr )
-                else
-                        call prep_wvfn_writeU2( ikpt, ispin, UofX2, fileHandle, ierr )
-                endif
-                if (ierr .ne. 0) return
-                deallocate( UofX, UofX2 )
+          if (perKptU2) then
+            call prep_wvfn_writeU2_perKpt( ikpt, ispin, UofX2, fileHandle, ierr )
+          else
+            call prep_wvfn_writeU2( ikpt, ispin, UofX2, fileHandle, ierr )
+          endif
+          if (ierr .ne. 0) return
+          deallocate( UofX, UofX2 )
         endif
 
         ! if doing CKS then compute matrix elements here
         if (wantCKS) then
-                if( ikpt .ne. 0 ) then
-                        call regular_prep_wvfn_checkFFT( nG, gvecPointer, wantCKS, .false., fftGrid, ierr )
-                        memEstimate = real( fftGrid(1), DP ) * real( fftGrid(2), DP ) * real( fftGrid(3), DP )
-                        bandChunk = max( floor( 67108864_DP / memEstimate ), 1 )
-                        omp_threads = 1
+          if( ikpt .ne. 0 ) then
+            call regular_prep_wvfn_checkFFT( nG, gvecPointer, wantCKS, .false., fftGrid, ierr )
+            memEstimate = real( fftGrid(1), DP ) * real( fftGrid(2), DP ) * real( fftGrid(3), DP )
+            bandChunk = max( floor( 67108864_DP / memEstimate ), 1 )
+            omp_threads = 1
 
-                        bandChunk = max( bandChunk, omp_threads )
-                        bandChunk = max( 1, bandChunk/omp_threads ) * omp_threads
+            bandChunk = max( bandChunk, omp_threads )
+            bandChunk = max( 1, bandChunk/omp_threads ) * omp_threads
 
-                        bandChunk = min( bandChunk, nbands )
-                        bandChunk = max( bandChunk, 1 )
+            bandChunk = min( bandChunk, nbands )
+            bandChunk = max( bandChunk, 1 )
 
-                        write(1000+myid, '(3I8,E24.16)' ) omp_threads, bandChunk, nbands, memEstimate/67108864_DP
-                        write(1000+myid,*) nbands, bandchunk
+            write(1000+myid, '(3I8,E24.16)' ) omp_threads, bandChunk, nbands, memEstimate/67108864_DP
+            write(1000+myid,*) nbands, bandchunk
 
-                        allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), bandChunk ) )
-                        do iband = 1, nbands, bandChunk
-                          if( nbands - iband + 1 .lt. bandChunk ) then
-                                  deallocate( wvfn )
-                                  allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nbands - iband + 1 ) )
-                          endif
-                          call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,iband:), wvfn )
+            allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), bandChunk ) )
+            do iband = 1, nbands, bandChunk
+              if( nbands - iband + 1 .lt. bandChunk ) then
+                deallocate( wvfn )
+                allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nbands - iband + 1 ) )
+              endif
+              call prep_wvfn_doFFT( gvecPointer, UofGPointer(:,iband:), wvfn )
 
-                          ! allocate CKS holder which requires queries for sites, maybe loop over all sites? need all the FHs
+              ! allocate CKS holder which requires queries for sites, maybe loop over all sites? need all the FHs
 
-                          ! call CKS
-                          ! deltaR is the min real-space spacing for the overlap, should make it an input
-                          deltaR = 0.02_DP
-                          addShift = (i .eq. 2 )
-                          call prep_system_ikpt2kvec( ikpt, addShift, kqVec, kqVecCart )
-                          if( iband .eq. 1 ) then
-                                  write(1000+myid, '(A,I8,6(1X,E24.16),1X,L2,I2)' ) 'kqVec', ikpt, kqVecCart(:), &
+              ! call CKS
+              ! deltaR is the min real-space spacing for the overlap, should make it an input
+              deltaR = 0.02_DP
+              addShift = (i .eq. 2 )
+              call prep_system_ikpt2kvec( ikpt, addShift, kqVec, kqVecCart )
+              if( iband .eq. 1 ) then
+                write(1000+myid, '(A,I8,6(1X,E24.16),1X,L2,I2)' ) 'kqVec', ikpt, kqVecCart(:), &
                                           kqVec(:), addShift, i
-                          endif
-                          call ocean_cks_build( wvfn, kqVecCart, deltaR, psys%avecs, (i.eq.1), iuni, iband-1, ierr )
-                        enddo
-                        deallocate( wvfn )
-                        ! call write CKS
-                endif
+              endif
+              call ocean_cks_build( wvfn, kqVecCart, deltaR, psys%avecs, (i.eq.1), iuni, iband-1, ierr )
+            enddo
+            deallocate( wvfn )
+            ! call write CKS
+          endif
         endif
 
         ! For realu2 option for cks conversion
         if (i .eq. 1) then
-                deallocate( valGvecs, valUofG )
+          deallocate( valGvecs, valUofG )
         else
-                deallocate( conGvecs, conUofG )
+          deallocate( conGvecs, conUofG )
         endif
 
 !        ! deallocate FFT wvfn
@@ -351,35 +351,35 @@ module prep_wvfn
     call screen_tk_start( "legacy" )
 
     if (wantU2) then
-        if (wantLegacy) then
-          write(1000+myid, * ) 'Calling Legacy Parallel'
-          flush(1000+myid)
-          call prep_wvfn_doLegacyParallel( ierr )
-          call MPI_BARRIER( comm, ierr )
-          write(1000+myid, * ) 'Finished Legacy Parallel'
-          flush(1000+myid)
-        endif
+      if (wantLegacy) then
+        write(1000+myid, * ) 'Calling Legacy Parallel'
+        flush(1000+myid)
+        call prep_wvfn_doLegacyParallel( ierr )
+        call MPI_BARRIER( comm, ierr )
+        write(1000+myid, * ) 'Finished Legacy Parallel'
+        flush(1000+myid)
+      endif
 !!      endif
     endif
 
     if (wantCKS) then
-            call ocean_cks_writeCksHolders( ierr )
-            if( ierr .ne. 0 ) return
-            call MPI_BARRIER( comm, ierr )
-            if( ierr .ne. 0 ) return
-            if( wantLegacy ) then
-                    write(1000+myid, * ) 'Calling Legacy CKS'
-                    flush(1000+myid)
-                    call ocean_cks_doLegacyCks( ierr )
-                    call MPI_BARRIER( comm, ierr )
-                    write(1000+myid, * ) 'Finished Legacy CKS'
-                    flush(1000+myid)
-            endif
+      call ocean_cks_writeCksHolders( ierr )
+      if( ierr .ne. 0 ) return
+      call MPI_BARRIER( comm, ierr )
+      if( ierr .ne. 0 ) return
+      if( wantLegacy ) then
+        write(1000+myid, * ) 'Calling Legacy CKS'
+        flush(1000+myid)
+        call ocean_cks_doLegacyCks( ierr )
+        call MPI_BARRIER( comm, ierr )
+        write(1000+myid, * ) 'Finished Legacy CKS'
+        flush(1000+myid)
+      endif
     endif
 
     if (wantTmels) then
-            call ocean_tmels_close(ierr)
-            if (wantLegacy) call ocean_tmels_legacy(totValBands, totConBands, params%nkpts, params%nspin, ierr)
+      call ocean_tmels_close(ierr)
+      if (wantLegacy) call ocean_tmels_legacy(totValBands, totConBands, params%nkpts, params%nspin, ierr)
     endif
 
     call screen_tk_stop( "legacy" )
@@ -405,13 +405,12 @@ module prep_wvfn
     integer, intent(inout) :: ierr
     complex(DP), allocatable :: wvfn(:,:,:,:)
     integer :: fftGrid(3), nband_chunk, nchunk, ichunk, nband_todo, ib, ib2
-    logical :: wantU2 = .true.
 
     complex(DP), allocatable :: UofX(:,:)
 
     !uofX2 has size (nX, allBands)
     ! For non-uniform grids, we want to check FFT without resizing
-    call irregular_prep_wvfn_checkFFT( nG, gvecPointer, .false., wantU2, fftGrid, ierr )
+    call irregular_prep_wvfn_checkFFT( nG, gvecPointer, fftGrid, ierr )
     nband_chunk = 1
     
     allocate( wvfn( fftGrid(1), fftGrid(2), fftGrid(3), nband_chunk ) )
@@ -1304,11 +1303,10 @@ module prep_wvfn
   end function prep_wvfn_divideXmesh
 
   !> Calculates non-uniform grid boundaries without downsampling
-  subroutine irregular_prep_wvfn_checkFFT( nG, gvecs, wantCKS, wantU2, fftGrid, ierr)
+  subroutine irregular_prep_wvfn_checkFFT( nG, gvecs, fftGrid, ierr)
     use ocean_mpi, only : myid
     use prep_system, only : system_parameters, params
     integer, intent( in ) :: nG, gvecs(3,nG)
-    logical, intent( in ) :: wantCKS, wantU2
     integer, intent( out ) :: fftGrid( 3 )
     integer, intent( inout ) :: ierr
     !
@@ -1326,7 +1324,6 @@ module prep_wvfn
     fftGrid(:) = boundaries(:,2) - boundaries(:,1) + 1
     write(1000+myid,'(A,3(1X,I8))') 'FFT grid', fftGrid(:)
 
-    if( wantCKS ) fftGrid(:) = fftGrid(:) * 2
     write(1000+myid,'(A,3(1X,I8))') 'FFT grid', fftGrid(:)
   end subroutine irregular_prep_wvfn_checkFFT
 
