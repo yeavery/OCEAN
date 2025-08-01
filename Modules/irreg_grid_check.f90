@@ -14,16 +14,16 @@ module irreg_grid_check
 contains 
 
   !> Checks for a non-uniform grid and its integration weights
-  !! It broadcasts the results to all processes
+  !! then broadcasts the results to all processes.
   subroutine check_for_grid( ierr ) 
     implicit none
     integer, intent(inout) :: ierr
     integer :: i, j
 
     if (myid .eq. root ) then
-            inquire(file='reduced_uniform.txt', exist=grid%have_curvi)
+            inquire(file='reduced_nonuniform.txt', exist=grid%have_curvi)
             if ( grid%have_curvi ) then
-                    open(unit=99, file='reduced_uniform.txt', form='formatted', status='old', action='read')
+                    open(unit=99, file='reduced_nonuniform.txt', form='formatted', status='old', action='read')
                     ! read number of coordinates from first line
                     read(99, *) grid%num_coord
                     allocate( grid%curvi_coord(3, grid%num_coord) )
