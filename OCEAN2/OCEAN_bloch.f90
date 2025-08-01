@@ -51,17 +51,18 @@ module OCEAN_bloch
     return
   end function OCEAN_bloch_is_loaded
 
+  !> Centers the core hole and calculates the plane waves
+  !! 
+  !! This subroutine determines whether a curvilinear grid exist based on the have_curvi flag
+  !! and calls the corresponding subroutine (regular_plane_wave or irregular_plane_wave) to perform the calculation.
+  !!
   subroutine OCEAN_bloch_lrLOAD( sys, tau, xshift, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp, ierr )
-    ! places core hole in grid
-    ! does not shift xmesh if using a curvilinear grid
 
     use OCEAN_mpi
     use OCEAN_system
     implicit none
     type( o_system ), intent( in ) :: sys
-    integer, intent( inout ) :: ierr
-!   real(DP), intent(out) :: rbs_out(my_num_bands,my_kpts,my_xpts,sys%nspn) 
-!    real(DP), intent(out) :: ibs_out(my_num_bands,my_kpts,my_xpts,sys%nspn) 
+    integer, intent( inout ) :: ierr 
     real(DP), intent(out) :: rbs_out(:,:,:,:)
     real(DP), intent(out) :: ibs_out(:,:,:,:)
     real(SP), intent(out) :: rbs_sp_out(:,:,:,:)
@@ -70,7 +71,6 @@ module OCEAN_bloch
     integer, intent( out ) :: xshift( 3 )
     logical, intent( in ) :: use_sp
 
-    real(DP) :: curvi_xshift(3)
     ! Change phase as if things were flipped around. Don't actually re-distribute
     !
     ! Reasoning for the below;
@@ -103,19 +103,7 @@ module OCEAN_bloch
                     xshift( 3 ) = floor( real(sys%xmesh(3), DP ) * (tau(3)-0.5d0 ) )
             endif
             xshift(:) = xshift(:) * xshift_override(:)
-    else 
-            curvi_xshift(:) = tau(:)
-            if(mod(sys%kmesh(1), 2) .eq. 1) then
-                    curvi_xshift(1) = tau(1)-0.5d0
-            endif
-            if(mod(sys%kmesh(2), 2) .eq. 1) then
-                    curvi_xshift(2) = tau(2)-0.5d0
-            endif
-            if(mod(sys%kmesh(3), 2) .eq. 1) then
-                    curvi_xshift(3) = tau(3)-0.5d0
-            endif
-            curvi_xshift(:) = 0
-    endif
+    endif 
 
     if( myid .eq. root ) write(6,*) 'Shifting X-grid by ', xshift(:)
     if( myid .eq. root ) write(6,*) 'Original tau ', tau(:)
@@ -124,26 +112,23 @@ module OCEAN_bloch
             tau( 1 ) = tau(1) - real(xshift(1), DP )/real(sys%xmesh(1), kind( 1.0d0 ))
             tau( 2 ) = tau(2) - real(xshift(2), DP )/real(sys%xmesh(2), kind( 1.0d0 ))
             tau( 3 ) = tau(3) - real(xshift(3), DP )/real(sys%xmesh(3), kind( 1.0d0 ))
-    else
-            ! shift tau to 0 or 1/2
-            tau(:) = tau(:) - curvi_xshift(:)
     endif
 
     
     if( myid .eq. root ) write(6,*) 'New tau      ', tau(:)
 
     if (grid%have_curvi) then
-            call irregular_lrLOAD( sys, ierr, curvi_xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+            call irregular_plane_wave( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
             if (ierr /= 0) goto 111
-            !deallocate(curvi_coord)
     else
-            call regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+            call regular_plane_wave( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
             if ( ierr /= 0 ) goto 111
     endif
 111 continue
   end subroutine OCEAN_bloch_lrLOAD
 
-  subroutine regular_lrLOAD( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
+  !> Calculates the plane waves on a uniform grid
+  subroutine regular_plane_wave( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )
   use OCEAN_mpi
   use OCEAN_system
   implicit none
@@ -236,16 +221,17 @@ module OCEAN_bloch
       enddo
     enddo
   enddo
-end subroutine regular_lrLOAD
+end subroutine regular_plane_wave
 
-  subroutine irregular_lrLOAD( sys, ierr, curvi_xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )          
+!> Calculates the plane waves on a non-uniform grid
+subroutine irregular_plane_wave( sys, ierr, xshift, tau, rbs_out, ibs_out, rbs_sp_out, ibs_sp_out, use_sp )          
       use OCEAN_mpi
       use OCEAN_system
       implicit none
       type(o_system), intent(in) :: sys
       integer, intent(inout) :: ierr
       real(DP), intent(in) :: tau(3)
-      real(DP), intent(in) :: curvi_xshift( 3 )
+      integer, intent(in) :: xshift(3)
       logical, intent(in) :: use_sp
       real(DP), intent(inout) :: rbs_out(:,:,:,:)
       real(DP), intent(inout) :: ibs_out(:,:,:,:)
@@ -259,13 +245,12 @@ end subroutine regular_lrLOAD
       integer :: i, j
       integer :: xiter, ibd, ispn 
 
-      ! new tau = tau, xshift = what you're shifting every coordinate by
       pi = 4.0d0 * atan( 1.0d0 )
       do ispn = 1, sys%nspn
         xiter = 0
         do i = 1, grid%num_coord
-          call do_shift(i, curvi_xshift)
-          ! ADDED XITER
+          ! option to shift coordinate
+          !call do_shift(i, curvi_xshift)
           xiter = xiter + 1
           if( xiter .lt. my_start_nx ) cycle
           if( xiter .gt. my_start_nx + my_xpts - 1 ) exit
@@ -280,8 +265,8 @@ end subroutine regular_lrLOAD
                 qvec(2) = real(iq2 - 1, DP) / real(sys%kmesh(2), DP)
                 qvec(3) = real(iq3 - 1, DP) / real(sys%kmesh(3), DP)
 
-                ! calculate phase shift: 2pi * (kvec dot coordinate)
-                phs_tot = 2.0d0 * pi * dot_product(qvec, grid%shifted_curvi(:, i)) 
+                ! calculate phase shift
+                phs_tot = 2.0d0 * pi * dot_product(qvec, grid%curvi_coord(:, i)) 
                 cphs = dcos(phs_tot) * sqrt(grid%weights(i))
                 sphs = dsin(phs_tot) * sqrt(grid%weights(i))
                 if (use_sp) then
@@ -306,11 +291,10 @@ end subroutine regular_lrLOAD
               enddo
             enddo
           enddo
-        ! for num_coord loop
-        enddo
+        enddo 
       enddo
   111 continue 
-  end subroutine irregular_lrLOAD
+  end subroutine irregular_plane_wave
 
   subroutine OCEAN_bloch_lrINIT( xpts, kpts, num_bands, start_nx, ierr )
     implicit none
@@ -707,9 +691,6 @@ end subroutine regular_lrLOAD
             endif
            nx_start = nx_start + nx_tmp
          enddo
-
-
-
         enddo
        enddo
       enddo

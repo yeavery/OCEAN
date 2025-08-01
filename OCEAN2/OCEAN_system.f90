@@ -8,6 +8,7 @@
 module OCEAN_system
   use AI_kinds
 !  use mpi
+  use irreg_grid_check, only: irreg_grid, grid
   implicit none
 
 
@@ -163,12 +164,16 @@ module OCEAN_system
     character(len=4) :: mode
 
     if( myid .eq. root ) then
-
-      open(unit=99,file='xmesh.ipt',form='formatted',status='old')
-      rewind(99)
-      read(99,*) sys%xmesh(:)
-      close(99)
-      sys%nxpts = product( sys%xmesh(:) )
+      if (grid%have_curvi) then
+              sys%nxpts = grid%num_coord
+      else
+              open(unit=99,file='xmesh.ipt',form='formatted',status='old')
+              rewind(99)
+              read(99,*) sys%xmesh(:)
+              close(99)
+              sys%nxpts = product( sys%xmesh(:) )
+              
+      endif
 
       open(unit=99,file='kmesh.ipt',form='formatted',status='old')
       rewind(99)

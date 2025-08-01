@@ -1656,7 +1656,10 @@ module ocean_long_range
 
   end subroutine lr_populate_W
 
-
+  !> Populates W2 matrix by calculating the potential at each point
+  !! 
+  !! This subroutine determines whether a non-uniform grid is used with the have_curvi flag and calls
+  !! the corresponding subroutine (regular_grid_potential or irregular_grid_potential) to perform the calculation 
   subroutine lr_populate_W2( sys, ierr )
     use OCEAN_mpi!, only : myid, comm, root
     use OCEAN_system
@@ -1741,10 +1744,10 @@ module ocean_long_range
 
     ! Irregular grid
     if (grid%have_curvi) then 
-            call irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
+            call irregular_grid_potential( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
             if (ierr /= 0) goto 111
     else
-            call regular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr)
+            call regular_grid_potential( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr)
             if (ierr /= 0) goto 111
     endif
     deallocate( ptab, rtab )
@@ -1753,7 +1756,8 @@ module ocean_long_range
 
   end subroutine lr_populate_W2
 
-  subroutine regular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
+  !> Calculates the potential on a uniform grid, taking periodic boundary conditions into account
+  subroutine regular_grid_potential( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
     ! Slow way to start
     !    use mpi
     use OCEAN_mpi!, only : myid, root, my_tau, my_xshift, my_start_nx, my_xpts, W
@@ -1868,12 +1872,10 @@ module ocean_long_range
         enddo
       enddo
     enddo
-  end subroutine regular_grid
+  end subroutine regular_grid_potential
 
-  subroutine irregular_grid( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
-    ! shifts grid so that it centers around the core hole
-    ! not many curvilinear changes except indexing
-
+  !> Calculates the potential on a non-uniform grid, taking periodic boundary conditions into account
+  subroutine irregular_grid_potential( sys, amet, epsi, nptab, ptab, rtab, isolated, pbc, ierr )
     use OCEAN_mpi!, only : myid, root, my_tau, my_xshift, my_start_nx, my_xpts, W
     use OCEAN_system 
     implicit none
@@ -1889,7 +1891,7 @@ module ocean_long_range
     integer :: i, k1, k2, k3, kk1, kk2, kk3, xiter, kiter
 
     if(grid%num_coord .ne. product(sys%xmesh(:))) then
-            print *, "xmesh does not match irregular grid dims"
+            print *, "xmesh dimensions do not match irregular grid dimensions"
             ierr = 3
             return
     endif
@@ -1959,7 +1961,7 @@ module ocean_long_range
             enddo  
     endif
     enddo
- end subroutine irregular_grid
+ end subroutine irregular_grid_potential
 
 #if 0
   subroutine lr_populate_bloch( sys, ierr )

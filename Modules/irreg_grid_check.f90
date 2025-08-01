@@ -12,6 +12,9 @@ module irreg_grid_check
   type(irreg_grid), public, protected :: grid
 
 contains 
+
+  !> Checks for a non-uniform grid and its integration weights
+  !! It broadcasts the results to all processes
   subroutine check_for_grid( ierr ) 
     implicit none
     integer, intent(inout) :: ierr
@@ -76,6 +79,7 @@ contains
 111 continue
   end subroutine check_for_grid
 
+  !> Shifts the curvilinear grid by xshift and stores the result in grid%shifted_curvi 
   subroutine do_shift(i, xshift)
     integer, intent(in) :: i
     real(DP), intent(in) :: xshift(3)
@@ -94,6 +98,7 @@ contains
 
   end subroutine do_shift
 
+  !> Deallocates every array
   subroutine irreg_grid_final(this)
     type(irreg_grid), intent(inout) :: this
     if (allocated(this%curvi_coord)) then
